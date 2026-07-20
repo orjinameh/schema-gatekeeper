@@ -1,0 +1,27 @@
+{
+  "name": "schema-gatekeeper",
+  "version": "1.0.0",
+  "description": "On-Demand Schema Gatekeeper — MCP proxy that strips tool bloat",
+  "bin": {
+    "schema-gatekeeper": "src/index.ts"
+  },
+  "scripts": {
+    "start": "node --import tsx/esm src/index.ts",
+    "dev": "node --import tsx/esm src/index.ts",
+    "test": "node --import tsx/esm src/test.ts"
+  },
+  "keywords": ["mcp", "llm", "proxy", "schema"],
+  "author": "",
+  "license": "MIT",
+  "type": "module",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/server-filesystem": "^2026.7.10",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.9.3"
+  }
+}

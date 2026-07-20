@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "gatekeeper": {
+      "command": "node",
+      "args": ["--import", "tsx/esm", "src/index.ts"]
+    }
+  }
+}

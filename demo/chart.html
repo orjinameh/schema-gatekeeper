@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Schema Gatekeeper — Benchmark</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'SF Mono', 'Fira Code', monospace; background: #0d1117; color: #e6edf3; padding: 40px; }
+    h1 { text-align: center; font-size: 1.6rem; margin-bottom: 8px; color: #58a6ff; }
+    .subtitle { text-align: center; color: #8b949e; margin-bottom: 40px; font-size: 0.9rem; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; max-width: 1100px; margin: 0 auto; }
+    .card { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 24px; }
+    .card.full { grid-column: 1 / -1; }
+    .card h2 { font-size: 1rem; color: #58a6ff; margin-bottom: 16px; }
+    .stat-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #21262d; }
+    .stat-row:last-child { border-bottom: none; }
+    .stat-label { color: #8b949e; }
+    .stat-value { font-weight: bold; color: #e6edf3; }
+    .stat-value.green { color: #3fb950; }
+    .stat-value.blue { color: #58a6ff; }
+    .big-number { font-size: 3rem; font-weight: bold; text-align: center; margin: 10px 0; }
+    .big-number.green { color: #3fb950; }
+    .chart-container { position: relative; height: 320px; }
+    .badge { display: inline-block; background: #238636; color: #fff; padding: 2px 8px; border-radius: 6px; font-size: 0.75rem; margin-left: 8px; }
+  </style>
+</head>
+<body>
+  <h1>On-Demand Schema Gatekeeper</h1>
+  <p class="subtitle">MCP Tool Schema Proxy — Benchmark Results</p>
+
+  <div class="grid">
+    <!-- Upfront Savings -->
+    <div class="card">
+      <h2>Upfront Token Cost</h2>
+      <div class="big-number green">91%</div>
+      <p style="text-align:center;color:#8b949e;margin-bottom:16px">fewer tokens on tools/list</p>
+      <div class="stat-row">
+        <span class="stat-label">Without proxy</span>
+        <span class="stat-value">1,853 tokens</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">With proxy</span>
+        <span class="stat-value green">159 tokens</span>
+      </div>
+    </div>
+
+    <!-- Conversation Savings -->
+    <div class="card">
+      <h2>5-Turn Conversation</h2>
+      <div class="big-number green">73%</div>
+      <p style="text-align:center;color:#8b949e;margin-bottom:16px">total tokens saved</p>
+      <div class="stat-row">
+        <span class="stat-label">Without proxy</span>
+        <span class="stat-value">1,994 tokens</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">With proxy</span>
+        <span class="stat-value green">534 tokens</span>
+      </div>
+    </div>
+
+    <!-- Chart: Tokens per turn -->
+    <div class="card full">
+      <h2>Tokens per Conversation Turn</h2>
+      <div class="chart-container">
+        <canvas id="turnChart"></canvas>
+      </div>
+    </div>
+
+    <!-- Stats Table -->
+    <div class="card">
+      <h2>System Stats</h2>
+      <div class="stat-row">
+        <span class="stat-label">Total tools registered</span>
+        <span class="stat-value blue">16</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Categories</span>
+        <span class="stat-value blue">7</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Tools in context (raw)</span>
+        <span class="stat-value">16 full JSON schemas</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Tools in context (proxy)</span>
+        <span class="stat-value green">8 compact signatures</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Context reduction</span>
+        <span class="stat-value green">50%</span>
+      </div>
+    </div>
+
+    <!-- How it works -->
+    <div class="card">
+      <h2>How It Works</h2>
+      <div class="stat-row">
+        <span class="stat-label">Step 1</span>
+        <span class="stat-value">LLM calls <code>request_skills</code></span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Step 2</span>
+        <span class="stat-value">Receives compact signatures</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Step 3</span>
+        <span class="stat-value">LLM calls <code>invoke_skill</code></span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Backend</span>
+        <span class="stat-value">Real MCP servers via stdio</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Fallback</span>
+        <span class="stat-value">Simulated results</span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const data = {
+      labels: ['Turn 1','Turn 2','Turn 3','Turn 4','Turn 5'],
+      descriptions: [
+        'System loads tools',
+        'User: Read file',
+        'Tool: read_file',
+        'User: Query DB',
+        'Tool: query'
+      ],
+      raw:   [1874, 1898, 1936, 1958, 1994],
+      proxy: [180,  211,  387,  411,  534]
+    };
+
+    new Chart(document.getElementById('turnChart'), {
+      type: 'line',
+      data: {
+        labels: data.labels.map((l, i) => l + '\n' + data.descriptions[i]),
+        datasets: [
+          {
+            label: 'Without Proxy (raw)',
+            data: data.raw,
+            borderColor: '#f85149',
+            backgroundColor: 'rgba(248,81,73,0.1)',
+            fill: true,
+            tension: 0.3,
+            pointRadius: 5,
+            pointHoverRadius: 7,
+            borderWidth: 2
+          },
+          {
+            label: 'With Proxy (gatekeeper)',
+            data: data.proxy,
+            borderColor: '#3fb950',
+            backgroundColor: 'rgba(63,185,80,0.1)',
+            fill: true,
+            tension: 0.3,
+            pointRadius: 5,
+            pointHoverRadius: 7,
+            borderWidth: 2
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { labels: { color: '#e6edf3', font: { family: 'monospace' } } },
+          tooltip: {
+            callbacks: {
+              afterBody: (items) => {
+                const i = items[0].dataIndex;
+                const delta = data.raw[i] - data.proxy[i];
+                const pct = Math.round((delta / data.raw[i]) * 100);
+                return `Savings: ${delta} tokens (${pct}%)`;
+              }
+            }
+          }
+        },
+        scales: {
+          x: { ticks: { color: '#8b949e', font: { size: 11 } }, grid: { color: '#21262d' } },
+          y: {
+            ticks: { color: '#8b949e', callback: v => v.toLocaleString() + ' tok' },
+            grid: { color: '#21262d' },
+            title: { display: true, text: 'Cumulative Tokens', color: '#8b949e' }
+          }
+        }
+      }
+    });
+  </script>
+</body>
+</html>

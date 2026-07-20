@@ -1,0 +1,36 @@
+{
+  "labels": [
+    "Turn 1",
+    "Turn 2",
+    "Turn 3",
+    "Turn 4",
+    "Turn 5"
+  ],
+  "raw": [
+    1874,
+    1898,
+    1936,
+    1958,
+    1994
+  ],
+  "proxy": [
+    180,
+    211,
+    387,
+    411,
+    534
+  ],
+  "descriptions": [
+    "System loads tools (tools/list)",
+    "User: 'Read my test file'",
+    "Tool execution: read_file",
+    "User: 'Query my database'",
+    "Tool execution: query"
+  ],
+  "summary": {
+    "upfrontSavings": 91,
+    "conversationSavings": 73,
+    "totalTools": 16,
+    "categories": 7
+  }
+}
