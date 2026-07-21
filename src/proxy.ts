@@ -90,6 +90,48 @@ interface DirectToolConfig {
   timeoutMs?: number;
 }
 
+// ─── Command Sandboxing ─────────────────────────────────────────────────────
+//
+// run_command executes arbitrary shell commands. Without restrictions, this is
+// a remote code execution vector. We block known-dangerous patterns and enforce
+// a hard timeout. This is NOT a security boundary — it's a guardrail for the
+// demo. Production use should use a proper sandbox (gVisor, nsjail, etc.).
+
+const BLOCKED_PATTERNS: RegExp[] = [
+  new RegExp("\\brm\\s+(-[a-zA-Z]*f|-[a-zA-Z]*r)\\b"),  // rm -rf, rm -fr
+  new RegExp("\\bmkfs\\b"),                                // format filesystem
+  new RegExp("\\bdd\\b.*of="),                             // dd writing to device
+  new RegExp("\\b:(){ :\\|:& };:"),                        // fork bomb
+  new RegExp("\\bchmod\\s+777\\b"),                        // world-writable
+  new RegExp("\\bcurl\\b.*\\|\\s*sh"),                     // pipe curl to shell
+  new RegExp("\\bwget\\b.*\\|\\s*sh"),                     // pipe wget to shell
+  new RegExp("\\bsudo\\b"),                                // privilege escalation
+  new RegExp("\\bsu\\b"),                                  // user switching
+  new RegExp("\\bkill\\s+-9\\s+1\\b"),                     // kill init
+  new RegExp("\\bshutdown\\b"),                            // shutdown
+  new RegExp("\\breboot\\b"),                              // reboot
+  new RegExp("\\bmount\\b"),                               // mount
+  new RegExp("\\bumount\\b"),                              // unmount
+  new RegExp("\\bifconfig\\b"),                            // network config
+  new RegExp("\\biptables\\b"),                            // firewall
+  new RegExp("\\bnc\\b.*-l"),                              // netcat listener
+  new RegExp("\\bexec\\s+"),                               // exec
+  new RegExp("\\beval\\s+"),                               // eval
+];
+
+/**
+ * Check if a command is blocked by the sandbox.
+ * Returns null if safe, or an error message if blocked.
+ */
+function checkCommandSandbox(command: string): string | null {
+  for (const pattern of BLOCKED_PATTERNS) {
+    if (pattern.test(command)) {
+      return `Command blocked by sandbox: matches dangerous pattern ${pattern}`;
+    }
+  }
+  return null;
+}
+
 const DIRECT_TOOL_MAP: Record<string, DirectToolConfig> = {
   git_status: {
     command: "git",
@@ -288,6 +330,19 @@ async function executeDirect(
     typeof config.timeoutMs === "function"
       ? config.timeoutMs(payload)
       : config.timeoutMs ?? 30_000;
+
+  // Sandbox check for run_command (arbitrary shell execution)
+  if (toolName === "run_command") {
+    const rawCommand = payload.command as string;
+    const blocked = checkCommandSandbox(rawCommand);
+    if (blocked) {
+      console.error(`[proxy] SANDBOX BLOCKED: ${blocked}`);
+      return {
+        content: [{ type: "text", text: blocked }],
+        isError: true,
+      };
+    }
+  }
 
   console.error(
     `[proxy] Direct exec: ${config.command} ${args.join(" ")} (cwd=${cwd ?? "inherit"})`

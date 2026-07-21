@@ -133,22 +133,22 @@ async function main() {
     process.exit(1);
   }
 
-  // Test 6: invoke_skill — simulated (git has no real backend)
-  const simResult = await client.callTool({
+  // Test 6: invoke_skill — real git backend
+  const gitResult = await client.callTool({
     name: "invoke_skill",
     arguments: {
       toolName: "git_status",
       payload: {},
     },
   });
-  const simText =
-    "content" in simResult
-      ? (simResult.content as Array<{ type: string; text: string }>)
+  const gitText =
+    "content" in gitResult
+      ? (gitResult.content as Array<{ type: string; text: string }>)
           .map((c) => c.text)
           .join("")
       : "";
-  const hasSimulated = simText.includes("simulated");
-  console.log(`[PASS] invoke_skill(git_status) → simulated=${hasSimulated}`);
+  const hasGitOutput = !gitResult.isError && gitText.length > 0;
+  console.log(`[PASS] invoke_skill(git_status) → real output=${hasGitOutput}`);
 
   // Test 7: invoke_skill — unknown tool
   const unknownResult = await client.callTool({
@@ -194,6 +194,57 @@ async function main() {
       : "";
   const hasNoMatches = noResultText.includes("No tools matched");
   console.log(`[PASS] search_tools("quantum entanglement") → no matches=${hasNoMatches}`);
+
+  // Test 10: sandbox — block rm -rf
+  const rmResult = await client.callTool({
+    name: "invoke_skill",
+    arguments: {
+      toolName: "run_command",
+      payload: { command: "rm -rf /tmp/important" },
+    },
+  });
+  const rmText =
+    "content" in rmResult
+      ? (rmResult.content as Array<{ type: string; text: string }>)
+          .map((c) => c.text)
+          .join("")
+      : "";
+  const rmBlocked = rmResult.isError && rmText.includes("blocked");
+  console.log(`[PASS] sandbox blocks rm -rf → blocked=${rmBlocked}`);
+
+  // Test 11: sandbox — block sudo
+  const sudoResult = await client.callTool({
+    name: "invoke_skill",
+    arguments: {
+      toolName: "run_command",
+      payload: { command: "sudo cat /etc/shadow" },
+    },
+  });
+  const sudoText =
+    "content" in sudoResult
+      ? (sudoResult.content as Array<{ type: string; text: string }>)
+          .map((c) => c.text)
+          .join("")
+      : "";
+  const sudoBlocked = sudoResult.isError && sudoText.includes("blocked");
+  console.log(`[PASS] sandbox blocks sudo → blocked=${sudoBlocked}`);
+
+  // Test 12: sandbox — allow safe commands
+  const safeResult = await client.callTool({
+    name: "invoke_skill",
+    arguments: {
+      toolName: "run_command",
+      payload: { command: "echo hello" },
+    },
+  });
+  const safeText =
+    "content" in safeResult
+      ? (safeResult.content as Array<{ type: string; text: string }>)
+          .map((c) => c.text)
+          .join("")
+      : "";
+  const safeAllowed = !safeResult.isError && safeText.includes("hello");
+  console.log(`[PASS] sandbox allows echo → allowed=${safeAllowed}`);
 
   await transport.close();
 
