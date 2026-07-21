@@ -100,6 +100,15 @@ async function main() {
   console.log(`[PASS] invoke_skill missing args → error=${badResult.isError}, msg includes "Missing required"=${hasMissingError}`);
 
   // Test 5: invoke_skill — real proxy to filesystem server
+  // First, create the test file via the proxy
+  await client.callTool({
+    name: "invoke_skill",
+    arguments: {
+      toolName: "write_file",
+      payload: { path: "/tmp/gatekeeper-test.txt", content: "Hello from Schema Gatekeeper proxy test!\n" },
+    },
+  });
+
   const realResult = await client.callTool({
     name: "invoke_skill",
     arguments: {
