@@ -68,16 +68,18 @@ The benchmark above measures tokens. This measures whether the agent actually pi
 ```
 ── TASK-SUCCESS: PROXY vs DIRECT ─────────────────────────────
 
-  Tasks evaluated:      9
-  Proxy path passed:    9/9 (100%)
-  Direct path passed:   9/9 (100%)
-  Agreement rate:       9/9
+  Tasks evaluated:      13 (9 single-step + 4 multi-step ambiguous)
+  Proxy path passed:    13/13 (100%)
+  Direct path passed:   13/13 (100%)
+  Agreement rate:       13/13
 
   ✓ Compact signatures do NOT confuse the agent on these tasks.
-    The tradeoff is latency (+54% discovery overhead) for token savings (-88%).
+    The tradeoff is latency (+49% discovery overhead) for token savings (-88%).
 ```
 
-The proxy path and direct path achieve identical task success. The cost is latency from discovery round-trips, not accuracy.
+Single-step tasks cover every real backend (file, git, system).
+Multi-step tasks stress-test category switching, ambiguous tool selection,
+and sequential discovery across 2-4 categories in one workflow.
 
 ## How It Works
 
@@ -121,11 +123,13 @@ Agent ←→ Schema Gatekeeper ←→ Real Backends
 
 - **Fixed categories are fragile.** The 7 categories in `registry.ts` are hand-curated. If a new tool doesn't fit cleanly, or the agent doesn't know the taxonomy, it has to guess. `search_tools` mitigates this with keyword fallback, but semantic/embedding-based search would be more robust at 100+ tools.
 
-- **Added latency per tool use.** Every tool invocation through the proxy requires a prior `request_skills` call (category discovery). That's +1 round-trip per tool use — a net latency cost for simple one-shot tasks. The eval shows +54% latency overhead across 9 tasks.
+- **`run_command` has basic sandboxing, not real security.** The command blocklist blocks known-dangerous patterns (rm -rf, sudo, fork bombs, etc.) but is not a security boundary. Production use should use a proper sandbox (gVisor, nsjail, container isolation).
+
+- **Added latency per tool use.** Every tool invocation through the proxy requires a prior `request_skills` call (category discovery). That's +1 round-trip per tool use — a net latency cost for simple one-shot tasks. The eval shows +49% latency overhead across 13 tasks.
 
 - **Token savings scale with tool count.** The 88% upfront savings are against 16 tools. At 50+ tools, savings would be larger. At 5 tools, they'd be negligible. This pattern only pays off when tool count is high enough to waste meaningful context.
 
-- **Task-success eval is promising but narrow.** 9/9 agreement on real tasks is strong, but these are single-step invocations. Multi-step tasks with ambiguous tool selection (e.g., "analyze this codebase" requiring file reads + git log + shell commands in sequence) would stress-test the proxy more. That's the next evaluation to run.
+- **Task-success eval is promising but narrow.** 13/13 agreement on real tasks is strong, including 4 multi-step ambiguous workflows. But these are scripted sequences — an actual LLM agent making tool-selection decisions under ambiguity would be the definitive test. That's the next milestone.
 
 - **Single contributor, no external validation.** This is a hackathon project. The eval results are reproducible (`npm run eval`) but haven't been independently verified.
 

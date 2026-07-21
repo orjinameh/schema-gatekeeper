@@ -188,6 +188,81 @@ const TASKS: EvalTask[] = [
       expectSuccess: true,
     },
   },
+
+  // ── Multi-step ambiguous tasks ──
+  // These require multiple tools across categories, with ambiguous tool selection.
+
+  {
+    name: "Audit this repo",
+    description: "Check git status, list files, and run a shell command — requires 3 categories",
+    proxySteps: [
+      { tool: "search_tools", args: { query: "git status" }, expectSuccess: true },
+      { tool: "invoke_skill", args: { toolName: "git_status", payload: {} }, expectSuccess: true },
+      { tool: "request_skills", args: { category: "file-operations" }, expectSuccess: true },
+      { tool: "invoke_skill", args: { toolName: "list_directory", payload: { path: "." } }, expectSuccess: true },
+      { tool: "request_skills", args: { category: "system" }, expectSuccess: true },
+      { tool: "invoke_skill", args: { toolName: "run_command", payload: { command: "wc -l src/*.ts" } }, expectSuccess: true },
+    ],
+    direct: {
+      server: { command: SERVER_CMD, args: GATEKEEPER_ARGS },
+      tool: "invoke_skill",
+      args: { toolName: "run_command", payload: { command: "wc -l src/*.ts" } },
+      expectSuccess: true,
+    },
+  },
+  {
+    name: "Write, verify, and commit",
+    description: "Write a file, read it back, check git status — ambiguous because agent must infer tool order",
+    proxySteps: [
+      { tool: "request_skills", args: { category: "file-operations" }, expectSuccess: true },
+      { tool: "invoke_skill", args: { toolName: "write_file", payload: { path: "/tmp/gatekeeper-verify.txt", content: "verification line\n" } }, expectSuccess: true },
+      { tool: "invoke_skill", args: { toolName: "read_file", payload: { path: "/tmp/gatekeeper-verify.txt" } }, expectSuccess: true },
+      { tool: "request_skills", args: { category: "git" }, expectSuccess: true },
+      { tool: "invoke_skill", args: { toolName: "git_status", payload: {} }, expectSuccess: true },
+    ],
+    direct: {
+      server: { command: SERVER_CMD, args: GATEKEEPER_ARGS },
+      tool: "invoke_skill",
+      args: { toolName: "git_status", payload: {} },
+      expectSuccess: true,
+    },
+  },
+  {
+    name: "Discover and execute unknown tool",
+    description: "Agent doesn't know category — must search first, then invoke",
+    proxySteps: [
+      { tool: "search_tools", args: { query: "list files directory" }, expectSuccess: true },
+      { tool: "invoke_skill", args: { toolName: "list_directory", payload: { path: "/tmp" } }, expectSuccess: true },
+      { tool: "search_tools", args: { query: "system information" }, expectSuccess: true },
+      { tool: "invoke_skill", args: { toolName: "get_environment", payload: {} }, expectSuccess: true },
+    ],
+    direct: {
+      server: { command: SERVER_CMD, args: GATEKEEPER_ARGS },
+      tool: "invoke_skill",
+      args: { toolName: "get_environment", payload: {} },
+      expectSuccess: true,
+    },
+  },
+  {
+    name: "Chain across 4 categories",
+    description: "file-operations → git → system → file-operations — tests category switching",
+    proxySteps: [
+      { tool: "request_skills", args: { category: "file-operations" }, expectSuccess: true },
+      { tool: "invoke_skill", args: { toolName: "write_file", payload: { path: "/tmp/gatekeeper-chain.txt", content: "chain test\n" } }, expectSuccess: true },
+      { tool: "request_skills", args: { category: "git" }, expectSuccess: true },
+      { tool: "invoke_skill", args: { toolName: "git_log", payload: { count: 2 } }, expectSuccess: true },
+      { tool: "request_skills", args: { category: "system" }, expectSuccess: true },
+      { tool: "invoke_skill", args: { toolName: "run_command", payload: { command: "cat /tmp/gatekeeper-chain.txt" } }, expectSuccess: true },
+      { tool: "request_skills", args: { category: "file-operations" }, expectSuccess: true },
+      { tool: "invoke_skill", args: { toolName: "read_file", payload: { path: "/tmp/gatekeeper-chain.txt" } }, expectSuccess: true },
+    ],
+    direct: {
+      server: { command: SERVER_CMD, args: GATEKEEPER_ARGS },
+      tool: "invoke_skill",
+      args: { toolName: "read_file", payload: { path: "/tmp/gatekeeper-chain.txt" } },
+      expectSuccess: true,
+    },
+  },
 ];
 
 // ─── Evaluation Runner ──────────────────────────────────────────────────────
