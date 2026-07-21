@@ -10,13 +10,20 @@
     "dev": "node --import tsx/esm src/index.ts",
     "test": "node --import tsx/esm src/test.ts",
     "benchmark": "node --import tsx/esm src/benchmark.ts",
-    "eval": "node --import tsx/esm src/eval.ts"
+    "eval": "node --import tsx/esm src/eval.ts",
+    "eval:agent": "node --import tsx/esm src/agent-eval.ts"
   },
-  "keywords": ["mcp", "llm", "proxy", "schema"],
+  "keywords": [
+    "mcp",
+    "llm",
+    "proxy",
+    "schema"
+  ],
   "author": "",
   "license": "MIT",
   "type": "module",
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.112.4",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@modelcontextprotocol/server-filesystem": "^2026.7.10",
     "zod": "^4.4.3"
