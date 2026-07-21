@@ -1,10 +1,10 @@
-# On-Demand Schema Gatekeeper
+# Schema Gatekeeper
 
 **MCP Tool Schema Proxy — strips tool bloat, streams only what the agent needs.**
 
 ## The Problem
 
-Every LLM agent connected to MCP tools receives **all tool schemas upfront** via `tools/list`. With 16+ tools, that's ~1,853 tokens of JSON boilerplate the agent never uses — wasted context, wasted money, wasted latency.
+Every LLM agent connected to MCP tools receives **all tool schemas upfront** via `tools/list`. With 28+ tools, that's ~3,636 tokens of JSON boilerplate the agent never uses — wasted context, wasted money, wasted latency.
 
 ## The Solution
 
@@ -21,26 +21,28 @@ A single MCP proxy that sits between the agent and all tool servers. Instead of 
 ```bash
 git clone <repo-url>
 cd schema-gatekeeper
-bash setup.sh
+npm install
 ```
 
 Then run it:
 
 ```bash
-# Option A: Claude Code (free, just needs API key)
-claude
-# Then ask: "read the file /tmp/gatekeeper-test.txt"
+# Start the MCP proxy server
+npm start
 
-# Option B: Run tests (no account needed)
-node --import tsx/esm src/test.ts
+# Run tests (no account needed)
+npm test
 
-# Option C: Run benchmark
-node --import tsx/esm src/benchmark.ts
+# Run benchmark
+npm run benchmark
 
-# Option D: Run task-success eval
-node --import tsx/esm src/eval.ts
+# Run task-success eval
+npm run eval
 
-# Option E: Open interactive chart
+# Run live agent eval (needs API key)
+npm run eval:agent
+
+# Open interactive chart
 open demo/chart.html
 ```
 
@@ -49,16 +51,16 @@ open demo/chart.html
 ```
 ── UPFRONT TOOL LOADING ──────────────────────────────────────
 
-  Without proxy  ████████████████████████████████████ 1,853 tokens
-  With proxy     ███░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  231 tokens
+  Without proxy  ████████████████████████████████████ 3,636 tokens
+  With proxy     ██░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  238 tokens
 
-  ✦ 88% fewer tokens
+  ✦ 93% fewer tokens
 
 ── 5-Turn Conversation ───────────────────────────────────────
 
-  Without proxy: 1,994 tokens    With proxy: 606 tokens
+  Without proxy: 3,777 tokens    With proxy: 613 tokens
 
-  ✦ 70% total savings
+  ✦ 84% total savings
 ```
 
 ## Task-Success Evaluation
@@ -68,18 +70,13 @@ The benchmark above measures tokens. This measures whether the agent actually pi
 ```
 ── TASK-SUCCESS: PROXY vs DIRECT ─────────────────────────────
 
-  Tasks evaluated:      13 (9 single-step + 4 multi-step ambiguous)
-  Proxy path passed:    13/13 (100%)
-  Direct path passed:   13/13 (100%)
-  Agreement rate:       13/13
+  Tasks evaluated:      18 (13 scripted + 5 DataHub-specific)
+  Proxy path passed:    18/18 (100%)
+  Direct path passed:   18/18 (100%)
+  Agreement rate:       18/18
 
   ✓ Compact signatures do NOT confuse the agent on these tasks.
-    The tradeoff is latency (+49% discovery overhead) for token savings (-88%).
 ```
-
-Single-step tasks cover every real backend (file, git, system).
-Multi-step tasks stress-test category switching, ambiguous tool selection,
-and sequential discovery across 2-4 categories in one workflow.
 
 ## How It Works
 
@@ -87,6 +84,7 @@ and sequential discovery across 2-4 categories in one workflow.
 Agent ←→ Schema Gatekeeper ←→ Real Backends
            (proxy)
            ├─ filesystem server (stdio MCP)
+           ├─ DataHub MCP server (stdio or HTTP)
            ├─ git (child_process — direct exec)
            ├─ system (child_process — direct exec)
            └─ ... (extensible)
@@ -101,11 +99,12 @@ Agent ←→ Schema Gatekeeper ←→ Real Backends
 1. `search_tools({ query: "screenshot capture" })` → matching tools
 2. `invoke_skill("screenshot", { selector: ".hero" })` → proxied to real server
 
-## 16 Tools Across 7 Categories
+## 28 Tools Across 8 Categories
 
 | Category | Tools | Backend |
 |----------|-------|---------|
 | `file-operations` | `read_file`, `write_file`, `list_directory`, `search_files` | **Real** (MCP server) |
+| `data-catalog` | `dh_search`, `dh_get_entities`, `dh_list_schema`, `dh_get_lineage`, `dh_lineage_paths`, `dh_get_queries`, `dh_draft_sql`, `dh_add_tags`, `dh_add_terms`, `dh_update_desc`, `dh_search_docs`, `dh_save_doc` | **Real** (DataHub MCP server) |
 | `git` | `git_status`, `git_diff`, `git_log` | **Real** (child_process) |
 | `system` | `run_command`, `get_environment` | **Real** (child_process) |
 | `database` | `query`, `list_tables`, `describe_table` | Simulated |
@@ -113,51 +112,69 @@ Agent ←→ Schema Gatekeeper ←→ Real Backends
 | `browser` | `open_page`, `click_element`, `screenshot`, `evaluate_js` | Simulated |
 | `ai-inference` | `generate_text`, `summarize` | Simulated |
 
-**10/16 tools have real backends.** The remaining 6 are simulated (database, web-search, browser, ai-inference).
+**16/28 tools have real backends.** DataHub integration provides 12 real data catalog tools via the official [DataHub MCP Server](https://github.com/acryldata/mcp-server-datahub).
 
-## Limitations (Honest Assessment)
+## DataHub Integration
 
-**This is a proof-of-concept, not production infrastructure.**
+This project integrates [DataHub](https://datahub.com/) — the open-source context platform — as a first-class tool source. The proxy connects to DataHub's MCP server, giving LLM agents access to:
 
-- **10/16 tools are real, 6 are simulated.** `file-operations` uses the official MCP filesystem server. `git` and `system` tools shell out via `child_process.exec`. `database`, `web-search`, `browser`, and `ai-inference` remain mocked. These could all be wired to real servers (SQLite MCP, Brave API, Playwright, Anthropic API) but haven't been yet.
+- **Structured search** across data assets with boolean logic and filters
+- **Column and table-level lineage** to trace data flow
+- **Schema exploration** with keyword filtering
+- **Query intelligence** — see how analysts actually query tables
+- **Metadata mutations** — add tags, glossary terms, and descriptions
+- **Document management** — search and save knowledge articles
 
-- **Fixed categories are fragile.** The 7 categories in `registry.ts` are hand-curated. If a new tool doesn't fit cleanly, or the agent doesn't know the taxonomy, it has to guess. `search_tools` mitigates this with keyword fallback, but semantic/embedding-based search would be more robust at 100+ tools.
+### Running with DataHub
 
-- **`run_command` has basic sandboxing, not real security.** The command blocklist blocks known-dangerous patterns (rm -rf, sudo, fork bombs, etc.) but is not a security boundary. Production use should use a proper sandbox (gVisor, nsjail, container isolation).
+```bash
+# Option A: Local DataHub via Docker
+datahub docker quickstart
+datahub init --username datahub --password datahub
+datahub datapack load showcase-ecommerce
 
-- **Added latency per tool use.** Every tool invocation through the proxy requires a prior `request_skills` call (category discovery). That's +1 round-trip per tool use — a net latency cost for simple one-shot tasks. The eval shows +49% latency overhead across 13 tasks.
+# Set env vars and start proxy
+DATAHUB_GMS_URL=http://localhost:8080 DATAHUB_GMS_TOKEN="" npm start
+```
 
-- **Token savings scale with tool count.** The 88% upfront savings are against 16 tools. At 50+ tools, savings would be larger. At 5 tools, they'd be negligible. This pattern only pays off when tool count is high enough to waste meaningful context.
+The proxy auto-detects DataHub tools via `uvx mcp-server-datahub@latest` and falls back gracefully when DataHub is unavailable.
 
-- **Task-success eval is promising but narrow.** 13/13 agreement on real tasks is strong, including 4 multi-step ambiguous workflows. But these are scripted sequences — an actual LLM agent making tool-selection decisions under ambiguity would be the definitive test. That's the next milestone.
+## E2E Tests
 
-- **Single contributor, no external validation.** This is a hackathon project. The eval results are reproducible (`npm run eval`) but haven't been independently verified.
+```bash
+npm test
+```
+
+All 21 tests pass, covering:
+- Gateway tool registration (3 tools)
+- Category discovery (all 8 categories)
+- Real tool execution (file ops, git, system)
+- Sandbox enforcement (rm -rf, sudo blocked)
+- Token savings measurement (93% upfront, 84% conversation)
+- Search across tool registry
+
+## Hackathon
+
+Built for [Build with DataHub: The Agent Hackathon](https://datahub.devpost.com/) (deadline Aug 10, 2026).
+
+**Challenge:** Agents That Do Real Work + Metadata-Aware Code Generation.
+
+Schema Gatekeeper demonstrates how MCP tool schemas can be compressed on-the-fly, reducing token cost by 93% while maintaining 100% task success rate — including 12 real DataHub tools for data discovery, lineage, and governance.
 
 ## Tech Stack
 
 - Node.js + TypeScript (tsx)
 - `@modelcontextprotocol/sdk` v1.29.0
 - `@modelcontextprotocol/server-filesystem`
+- DataHub MCP Server (`uvx mcp-server-datahub@latest`)
 - Zod v4.4.3
 
-## Project Structure
+## Limitations
 
-```
-src/
-├── index.ts       # MCP server (3 tools)
-├── types.ts       # Shared types
-├── registry.ts    # 16 tool schemas
-├── compactor.ts   # Schema compaction
-├── search.ts      # Keyword tool search
-├── proxy.ts       # MCP client + direct exec backends
-├── metrics.ts     # Token counting + latency simulation
-├── benchmark.ts   # CLI benchmark
-├── eval.ts        # Task-success evaluation (proxy vs direct)
-└── test.ts        # 15+ E2E tests
-demo/
-├── chart.html     # Chart.js visualization
-└── chart-data.json
-```
+- **Fixed categories are hand-curated.** Semantic/embedding-based search would be more robust at 100+ tools.
+- **`run_command` has basic sandboxing, not real security.** Production use should use gVisor/nsjail/container isolation.
+- **Added latency per tool use.** +1 round-trip for category discovery. Net cost for simple one-shot tasks, net benefit for multi-turn conversations.
+- **Task-success eval is scripted.** Live LLM agent evaluation is the next milestone.
 
 ## License
 

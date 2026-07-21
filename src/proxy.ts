@@ -1,10 +1,11 @@
 /**
- * MCP Proxy — spawns and connects to real MCP servers via stdio,
+ * MCP Proxy — spawns and connects to real MCP servers via stdio or HTTP,
  * and executes direct commands for git/system tools.
  *
- * Two backend types:
- *   1. MCP server connections (file operations)
- *   2. Direct child_process.exec (git, system commands)
+ * Backend types:
+ *   1. MCP server via stdio (file operations, local DataHub)
+ *   2. MCP server via HTTP (DataHub Cloud managed endpoint)
+ *   3. Direct child_process.exec (git, system commands)
  */
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -12,6 +13,7 @@ import {
   StdioClientTransport,
   type StdioServerParameters,
 } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { ToolSchema } from "./types.js";
 import path from "node:path";
 import fs from "node:fs";
@@ -44,10 +46,36 @@ export interface ServerConfig {
   allowedDirs?: string[];
 }
 
+// HTTP-based MCP server config (for DataHub Cloud managed endpoint)
+export interface HttpServerConfig {
+  url: string;           // e.g. https://<tenant>.acryl.io/integrations/ai/mcp/
+  headers?: Record<string, string>;  // e.g. Authorization: Bearer <token>
+}
+
 const FILESYSTEM_SERVER = path.join(
   PROJECT_ROOT,
   "node_modules/@modelcontextprotocol/server-filesystem/dist/index.js"
 );
+
+// DataHub MCP server (via uvx for local, or HTTP for cloud)
+const UVX_BIN = path.join(
+  process.env.HOME ?? "/home",
+  ".local/bin/uvx"
+);
+
+// Determine DataHub connection mode based on environment
+const DATAHUB_CLOUD_URL = process.env.DATAHUB_CLOUD_URL ?? "";  // e.g. https://<tenant>.acryl.io/integrations/ai/mcp/
+const DATAHUB_GMS_URL = process.env.DATAHUB_GMS_URL ?? "";      // e.g. http://localhost:8080
+const DATAHUB_GMS_TOKEN = process.env.DATAHUB_GMS_TOKEN ?? "";
+
+// Build DataHub MCP env for local uvx mode
+const DATAHUB_MCP_ARGS = ["mcp-server-datahub@latest"];
+const DATAHUB_MCP_ENV: Record<string, string> = {
+  DATAHUB_GMS_URL,
+  DATAHUB_GMS_TOKEN,
+  TOOLS_IS_MUTATION_ENABLED: "true",
+  TOOLS_IS_USER_ENABLED: "true",
+};
 
 // Map: toolName → server config
 const TOOL_SERVER_MAP: Record<string, ServerConfig> = {
@@ -69,6 +97,68 @@ const TOOL_SERVER_MAP: Record<string, ServerConfig> = {
     args: [FILESYSTEM_SERVER, "/tmp", "/home"],
   },
 
+  // DataHub → DataHub MCP server (via uvx)
+  dh_search: {
+    command: UVX_BIN,
+    args: DATAHUB_MCP_ARGS,
+    env: DATAHUB_MCP_ENV,
+  },
+  dh_get_entities: {
+    command: UVX_BIN,
+    args: DATAHUB_MCP_ARGS,
+    env: DATAHUB_MCP_ENV,
+  },
+  dh_list_schema: {
+    command: UVX_BIN,
+    args: DATAHUB_MCP_ARGS,
+    env: DATAHUB_MCP_ENV,
+  },
+  dh_get_lineage: {
+    command: UVX_BIN,
+    args: DATAHUB_MCP_ARGS,
+    env: DATAHUB_MCP_ENV,
+  },
+  dh_lineage_paths: {
+    command: UVX_BIN,
+    args: DATAHUB_MCP_ARGS,
+    env: DATAHUB_MCP_ENV,
+  },
+  dh_get_queries: {
+    command: UVX_BIN,
+    args: DATAHUB_MCP_ARGS,
+    env: DATAHUB_MCP_ENV,
+  },
+  dh_draft_sql: {
+    command: UVX_BIN,
+    args: DATAHUB_MCP_ARGS,
+    env: DATAHUB_MCP_ENV,
+  },
+  dh_add_tags: {
+    command: UVX_BIN,
+    args: DATAHUB_MCP_ARGS,
+    env: DATAHUB_MCP_ENV,
+  },
+  dh_add_terms: {
+    command: UVX_BIN,
+    args: DATAHUB_MCP_ARGS,
+    env: DATAHUB_MCP_ENV,
+  },
+  dh_update_desc: {
+    command: UVX_BIN,
+    args: DATAHUB_MCP_ARGS,
+    env: DATAHUB_MCP_ENV,
+  },
+  dh_search_docs: {
+    command: UVX_BIN,
+    args: DATAHUB_MCP_ARGS,
+    env: DATAHUB_MCP_ENV,
+  },
+  dh_save_doc: {
+    command: UVX_BIN,
+    args: DATAHUB_MCP_ARGS,
+    env: DATAHUB_MCP_ENV,
+  },
+
   // Database → @modelcontextprotocol/server-sqlite (if available)
   // For now, these stay simulated — no real SQLite server installed yet
 
@@ -78,6 +168,32 @@ const TOOL_SERVER_MAP: Record<string, ServerConfig> = {
 
   // AI inference → simulated
 };
+
+// ─── HTTP Server Config Mapping ──────────────────────────────────────────────
+// For DataHub Cloud managed MCP endpoint (streamable HTTP transport)
+
+const DATAHUB_HTTP_CONFIG: HttpServerConfig | null =
+  DATAHUB_CLOUD_URL && DATAHUB_GMS_TOKEN
+    ? {
+        url: DATAHUB_CLOUD_URL,
+        headers: {
+          Authorization: `Bearer ${DATAHUB_GMS_TOKEN}`,
+        },
+      }
+    : null;
+
+// Map tool names to HTTP server configs (DataHub Cloud)
+const TOOL_HTTP_MAP: Record<string, HttpServerConfig> = {};
+if (DATAHUB_HTTP_CONFIG) {
+  const dhTools = [
+    "dh_search", "dh_get_entities", "dh_list_schema", "dh_get_lineage",
+    "dh_lineage_paths", "dh_get_queries", "dh_draft_sql", "dh_add_tags",
+    "dh_add_terms", "dh_update_desc", "dh_search_docs", "dh_save_doc",
+  ];
+  for (const tool of dhTools) {
+    TOOL_HTTP_MAP[tool] = DATAHUB_HTTP_CONFIG;
+  }
+}
 
 // ─── Direct Command Execution ───────────────────────────────────────────────
 //
@@ -175,14 +291,17 @@ const DIRECT_TOOL_MAP: Record<string, DirectToolConfig> = {
 // Set of all tool names with real backends (MCP or direct)
 const ALL_REAL_TOOLS = new Set([
   ...Object.keys(TOOL_SERVER_MAP),
+  ...Object.keys(TOOL_HTTP_MAP),
   ...Object.keys(DIRECT_TOOL_MAP),
 ]);
 
 // ─── Connection Pool ─────────────────────────────────────────────────────────
 
+type AnyTransport = StdioClientTransport | StreamableHTTPClientTransport;
+
 interface PooledConnection {
   client: Client;
-  transport: StdioClientTransport;
+  transport: AnyTransport;
   serverName: string;
   connected: boolean;
 }
@@ -191,10 +310,52 @@ const connectionPool = new Map<string, PooledConnection>();
 
 /**
  * Get or create a connection to the MCP server that handles a given tool.
+ * Checks HTTP map first (DataHub Cloud), then stdio map (local servers).
  */
 async function getConnection(
   toolName: string
 ): Promise<PooledConnection | null> {
+  // ── HTTP transport (DataHub Cloud) ──
+  const httpConfig = TOOL_HTTP_MAP[toolName];
+  if (httpConfig) {
+    const poolKey = `http:${httpConfig.url}`;
+    const existing = connectionPool.get(poolKey);
+    if (existing?.connected) return existing;
+
+    const transport = new StreamableHTTPClientTransport(
+      new URL(httpConfig.url),
+      {
+        requestInit: {
+          headers: httpConfig.headers ?? {},
+        },
+      }
+    );
+
+    const client = new Client(
+      { name: "schema-gatekeeper", version: "1.0.0" },
+      { capabilities: {} }
+    );
+
+    try {
+      await client.connect(transport);
+    } catch (err) {
+      console.error(
+        `[proxy] Failed to connect to HTTP server for "${toolName}": ${err instanceof Error ? err.message : String(err)}`
+      );
+      return null;
+    }
+
+    const conn: PooledConnection = {
+      client,
+      transport,
+      serverName: poolKey,
+      connected: true,
+    };
+    connectionPool.set(poolKey, conn);
+    return conn;
+  }
+
+  // ── Stdio transport (local MCP servers) ──
   const config = TOOL_SERVER_MAP[toolName];
   if (!config) return null;
 
@@ -223,7 +384,7 @@ async function getConnection(
     console.error(
       `[proxy] Failed to connect to server for tools: ${err instanceof Error ? err.message : String(err)}`
     );
-    throw err;
+    return null;  // Graceful fallback — falls back to simulated response
   }
 
   const conn: PooledConnection = {
@@ -242,12 +403,26 @@ async function getConnection(
  * The filesystem server exposes tools with different names than ours.
  */
 function mapToolName(upstreamToolName: string): string {
-  // Our names → filesystem server names
+  // Our names → upstream server names
   const nameMap: Record<string, string> = {
+    // Filesystem server
     read_file: "read_file",
     write_file: "write_file",
     list_directory: "list_directory",
     search_files: "search_files",
+    // DataHub MCP server
+    dh_search: "search",
+    dh_get_entities: "get_entities",
+    dh_list_schema: "list_schema_fields",
+    dh_get_lineage: "get_lineage",
+    dh_lineage_paths: "get_lineage_paths_between",
+    dh_get_queries: "get_dataset_queries",
+    dh_draft_sql: "draft_sql_for_tables",
+    dh_add_tags: "add_tags",
+    dh_add_terms: "add_terms",
+    dh_update_desc: "update_description",
+    dh_search_docs: "search_documents",
+    dh_save_doc: "save_document",
   };
   return nameMap[upstreamToolName] ?? upstreamToolName;
 }

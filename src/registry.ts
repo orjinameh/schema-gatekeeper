@@ -8,6 +8,7 @@ export const CATEGORIES = [
   "git",
   "ai-inference",
   "system",
+  "data-catalog",
 ] as const;
 
 export type Category = (typeof CATEGORIES)[number];
@@ -400,6 +401,347 @@ export const REGISTRY: ToolSchema[] = [
       title: "GetEnvironmentArguments",
       properties: {},
       required: [],
+      additionalProperties: false,
+    },
+  },
+
+  // ── data-catalog (DataHub) ──
+  {
+    name: "dh_search",
+    category: "data-catalog",
+    description:
+      "Search DataHub for datasets, dashboards, and other data assets using structured keyword search with boolean logic, wildcards, and filters.",
+    inputSchema: {
+      type: "object",
+      title: "DataHubSearchArguments",
+      description: "Arguments for searching DataHub catalog.",
+      properties: {
+        query: {
+          type: "string",
+          description:
+            'Search query. Supports boolean logic (OR, AND), wildcards (revenue_*), and field filters (tag:PII).',
+          title: "Search Query",
+        },
+        filters: {
+          type: "string",
+          description:
+            "Comma-separated filter expressions, e.g. 'platform:snowflake,env:PROD'.",
+          title: "Filters",
+        },
+        limit: {
+          type: "number",
+          description: "Maximum number of results. Defaults to 10.",
+          title: "Limit",
+        },
+      },
+      required: ["query"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "dh_get_entities",
+    category: "data-catalog",
+    description:
+      "Fetch detailed metadata for one or more DataHub entities by URN, including ownership, tags, glossary terms, and descriptions.",
+    inputSchema: {
+      type: "object",
+      title: "DataHubGetEntitiesArguments",
+      description: "Arguments for fetching entity metadata from DataHub.",
+      properties: {
+        urns: {
+          type: "string",
+          description:
+            "Comma-separated list of entity URNs to fetch (e.g. urn:li:dataset:(...))",
+          title: "Entity URNs",
+        },
+      },
+      required: ["urns"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "dh_list_schema",
+    category: "data-catalog",
+    description:
+      "List schema fields for a dataset with optional keyword filtering. Returns column names, types, and descriptions.",
+    inputSchema: {
+      type: "object",
+      title: "DataHubListSchemaArguments",
+      description: "Arguments for listing dataset schema fields.",
+      properties: {
+        urn: {
+          type: "string",
+          description: "URN of the dataset to inspect",
+          title: "Dataset URN",
+        },
+        filter: {
+          type: "string",
+          description:
+            "Optional keyword to filter schema fields (e.g. 'email', 'date')",
+          title: "Filter",
+        },
+        start: {
+          type: "number",
+          description: "Pagination offset. Defaults to 0.",
+          title: "Start",
+        },
+        count: {
+          type: "number",
+          description: "Number of fields to return. Defaults to 40.",
+          title: "Count",
+        },
+      },
+      required: ["urn"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "dh_get_lineage",
+    category: "data-catalog",
+    description:
+      "Get upstream or downstream lineage for any DataHub entity (datasets, columns, dashboards) with hop control and pagination.",
+    inputSchema: {
+      type: "object",
+      title: "DataHubGetLineageArguments",
+      description: "Arguments for fetching data lineage.",
+      properties: {
+        urn: {
+          type: "string",
+          description: "URN of the entity to get lineage for",
+          title: "Entity URN",
+        },
+        direction: {
+          type: "string",
+          description:
+            'Lineage direction: "UPSTREAM" (where data comes from) or "DOWNSTREAM" (where data flows to). Defaults to DOWNSTREAM.',
+          title: "Direction",
+        },
+        max_hops: {
+          type: "number",
+          description: "Maximum number of lineage hops. Defaults to 1.",
+          title: "Max Hops",
+        },
+        start: {
+          type: "number",
+          description: "Pagination offset. Defaults to 0.",
+          title: "Start",
+        },
+        count: {
+          type: "number",
+          description: "Number of results. Defaults to 40.",
+          title: "Count",
+        },
+      },
+      required: ["urn"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "dh_lineage_paths",
+    category: "data-catalog",
+    description:
+      "Get the exact lineage path between two DataHub entities, including intermediate transformations and SQL query context.",
+    inputSchema: {
+      type: "object",
+      title: "DataHubLineagePathsArguments",
+      description:
+        "Arguments for finding lineage paths between two assets.",
+      properties: {
+        source_urn: {
+          type: "string",
+          description: "URN of the source entity",
+          title: "Source URN",
+        },
+        destination_urn: {
+          type: "string",
+          description: "URN of the destination entity",
+          title: "Destination URN",
+        },
+        max_hops: {
+          type: "number",
+          description: "Maximum hops to search. Defaults to 3.",
+          title: "Max Hops",
+        },
+      },
+      required: ["source_urn", "destination_urn"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "dh_get_queries",
+    category: "data-catalog",
+    description:
+      "Fetch real SQL queries that reference a dataset or column. Understand usage patterns, join behavior, and aggregation logic.",
+    inputSchema: {
+      type: "object",
+      title: "DataHubGetQueriesArguments",
+      description: "Arguments for fetching dataset query history.",
+      properties: {
+        urn: {
+          type: "string",
+          description: "URN of the dataset or column",
+          title: "Entity URN",
+        },
+        limit: {
+          type: "number",
+          description: "Maximum queries to return. Defaults to 10.",
+          title: "Limit",
+        },
+      },
+      required: ["urn"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "dh_draft_sql",
+    category: "data-catalog",
+    description:
+      "Draft a SQL query against specified tables using DataHub context (schemas, sample queries, lineage).",
+    inputSchema: {
+      type: "object",
+      title: "DataHubDraftSqlArguments",
+      description: "Arguments for drafting SQL from catalog context.",
+      properties: {
+        tables: {
+          type: "string",
+          description:
+            "Comma-separated URNs of tables to query against",
+          title: "Table URNs",
+        },
+        question: {
+          type: "string",
+          description:
+            "Natural language description of what the SQL should answer",
+          title: "Question",
+        },
+      },
+      required: ["tables", "question"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "dh_add_tags",
+    category: "data-catalog",
+    description:
+      "Add tags to a DataHub entity or schema field for classification and discovery.",
+    inputSchema: {
+      type: "object",
+      title: "DataHubAddTagsArguments",
+      description: "Arguments for adding tags to an entity.",
+      properties: {
+        urn: {
+          type: "string",
+          description: "URN of the entity to tag",
+          title: "Entity URN",
+        },
+        tags: {
+          type: "string",
+          description: "Comma-separated tag names to add",
+          title: "Tags",
+        },
+      },
+      required: ["urn", "tags"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "dh_add_terms",
+    category: "data-catalog",
+    description:
+      "Add business glossary terms to an entity or schema field for data governance.",
+    inputSchema: {
+      type: "object",
+      title: "DataHubAddTermsArguments",
+      description: "Arguments for adding glossary terms.",
+      properties: {
+        urn: {
+          type: "string",
+          description: "URN of the entity to annotate",
+          title: "Entity URN",
+        },
+        terms: {
+          type: "string",
+          description: "Comma-separated glossary term names",
+          title: "Terms",
+        },
+      },
+      required: ["urn", "terms"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "dh_update_desc",
+    category: "data-catalog",
+    description:
+      "Update, append to, or remove the description of a DataHub entity or schema field.",
+    inputSchema: {
+      type: "object",
+      title: "DataHubUpdateDescriptionArguments",
+      description: "Arguments for updating an entity description.",
+      properties: {
+        urn: {
+          type: "string",
+          description: "URN of the entity to update",
+          title: "Entity URN",
+        },
+        description: {
+          type: "string",
+          description:
+            "New description text. Set to empty string to remove.",
+          title: "Description",
+        },
+      },
+      required: ["urn", "description"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "dh_search_docs",
+    category: "data-catalog",
+    description:
+      "Search DataHub knowledge documents (runbooks, FAQs, insights) by keyword.",
+    inputSchema: {
+      type: "object",
+      title: "DataHubSearchDocsArguments",
+      description: "Arguments for searching knowledge documents.",
+      properties: {
+        query: {
+          type: "string",
+          description: "Search keyword for documents",
+          title: "Query",
+        },
+        limit: {
+          type: "number",
+          description: "Maximum results. Defaults to 10.",
+          title: "Limit",
+        },
+      },
+      required: ["query"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "dh_save_doc",
+    category: "data-catalog",
+    description:
+      "Save a document (insight, decision, FAQ, note) to DataHub's knowledge base.",
+    inputSchema: {
+      type: "object",
+      title: "DataHubSaveDocArguments",
+      description: "Arguments for saving a knowledge document.",
+      properties: {
+        title: {
+          type: "string",
+          description: "Document title",
+          title: "Title",
+        },
+        content: {
+          type: "string",
+          description: "Document content (supports markdown)",
+          title: "Content",
+        },
+      },
+      required: ["title", "content"],
       additionalProperties: false,
     },
   },

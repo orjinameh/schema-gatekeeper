@@ -263,6 +263,84 @@ const TASKS: EvalTask[] = [
       expectSuccess: true,
     },
   },
+
+  // ── DataHub data-catalog tasks ──
+  // These test the data-catalog category through the proxy.
+  // The "direct" path skips discovery and calls invoke_skill directly.
+
+  {
+    name: "DataHub: discover data-catalog",
+    description: "Discover data-catalog tools via request_skills, then search for datasets",
+    proxySteps: [
+      { tool: "request_skills", args: { category: "data-catalog" }, expectSuccess: true },
+      { tool: "invoke_skill", args: { toolName: "dh_search", payload: { query: "revenue" } }, expectSuccess: true },
+    ],
+    direct: {
+      server: { command: SERVER_CMD, args: GATEKEEPER_ARGS },
+      tool: "invoke_skill",
+      args: { toolName: "dh_search", payload: { query: "revenue" } },
+      expectSuccess: true,
+    },
+  },
+  {
+    name: "DataHub: search and inspect schema",
+    description: "Search for a dataset, then list its schema fields",
+    proxySteps: [
+      { tool: "request_skills", args: { category: "data-catalog" }, expectSuccess: true },
+      { tool: "invoke_skill", args: { toolName: "dh_search", payload: { query: "orders", limit: 5 } }, expectSuccess: true },
+      { tool: "invoke_skill", args: { toolName: "dh_list_schema", payload: { urn: "urn:li:dataset:(urn:li:dataPlatform:demo,orders,PROD)" } }, expectSuccess: true },
+    ],
+    direct: {
+      server: { command: SERVER_CMD, args: GATEKEEPER_ARGS },
+      tool: "invoke_skill",
+      args: { toolName: "dh_list_schema", payload: { urn: "urn:li:dataset:(urn:li:dataPlatform:demo,orders,PROD)" } },
+      expectSuccess: true,
+    },
+  },
+  {
+    name: "DataHub: trace lineage",
+    description: "Get downstream lineage for a dataset",
+    proxySteps: [
+      { tool: "request_skills", args: { category: "data-catalog" }, expectSuccess: true },
+      { tool: "invoke_skill", args: { toolName: "dh_get_lineage", payload: { urn: "urn:li:dataset:(urn:li:dataPlatform:demo,orders,PROD)", direction: "DOWNSTREAM" } }, expectSuccess: true },
+    ],
+    direct: {
+      server: { command: SERVER_CMD, args: GATEKEEPER_ARGS },
+      tool: "invoke_skill",
+      args: { toolName: "dh_get_lineage", payload: { urn: "urn:li:dataset:(urn:li:dataPlatform:demo,orders,PROD)", direction: "DOWNSTREAM" } },
+      expectSuccess: true,
+    },
+  },
+  {
+    name: "DataHub: cross-category data + file",
+    description: "Search DataHub, then write results to a file — data-catalog + file-operations",
+    proxySteps: [
+      { tool: "request_skills", args: { category: "data-catalog" }, expectSuccess: true },
+      { tool: "invoke_skill", args: { toolName: "dh_search", payload: { query: "customer" } }, expectSuccess: true },
+      { tool: "request_skills", args: { category: "file-operations" }, expectSuccess: true },
+      { tool: "invoke_skill", args: { toolName: "write_file", payload: { path: "/tmp/gatekeeper-datahub.txt", content: "DataHub search results saved\n" } }, expectSuccess: true },
+    ],
+    direct: {
+      server: { command: SERVER_CMD, args: GATEKEEPER_ARGS },
+      tool: "invoke_skill",
+      args: { toolName: "dh_search", payload: { query: "customer" } },
+      expectSuccess: true,
+    },
+  },
+  {
+    name: "DataHub: search for data tools",
+    description: "Use search_tools to find data catalog tools when category is unclear",
+    proxySteps: [
+      { tool: "search_tools", args: { query: "dataset search catalog" }, expectSuccess: true },
+      { tool: "invoke_skill", args: { toolName: "dh_search", payload: { query: "test" } }, expectSuccess: true },
+    ],
+    direct: {
+      server: { command: SERVER_CMD, args: GATEKEEPER_ARGS },
+      tool: "invoke_skill",
+      args: { toolName: "dh_search", payload: { query: "test" } },
+      expectSuccess: true,
+    },
+  },
 ];
 
 // ─── Evaluation Runner ──────────────────────────────────────────────────────

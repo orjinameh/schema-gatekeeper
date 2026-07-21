@@ -7,18 +7,18 @@
     "Turn 5"
   ],
   "raw": [
-    1874,
-    1898,
-    1936,
-    1958,
-    1994
+    3657,
+    3681,
+    3719,
+    3741,
+    3777
   ],
   "proxy": [
-    252,
-    283,
-    459,
-    483,
-    606
+    259,
+    290,
+    466,
+    490,
+    613
   ],
   "descriptions": [
     "System loads tools (tools/list)",
@@ -42,10 +42,10 @@
     4
   ],
   "summary": {
-    "upfrontSavings": 88,
-    "conversationSavings": 70,
-    "totalTools": 16,
-    "categories": 7,
+    "upfrontSavings": 93,
+    "conversationSavings": 84,
+    "totalTools": 28,
+    "categories": 8,
     "totalRawToolCalls": 2,
     "totalProxyToolCalls": 4,
     "estimatedRawLatencyMs": 400,
