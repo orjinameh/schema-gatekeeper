@@ -8,7 +8,9 @@
   "scripts": {
     "start": "node --import tsx/esm src/index.ts",
     "dev": "node --import tsx/esm src/index.ts",
-    "test": "node --import tsx/esm src/test.ts"
+    "test": "node --import tsx/esm src/test.ts",
+    "benchmark": "node --import tsx/esm src/benchmark.ts",
+    "eval": "node --import tsx/esm src/eval.ts"
   },
   "keywords": ["mcp", "llm", "proxy", "schema"],
   "author": "",

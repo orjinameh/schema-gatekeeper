@@ -1,8 +1,10 @@
 /**
- * MCP Proxy — spawns and connects to real MCP servers via stdio.
+ * MCP Proxy — spawns and connects to real MCP servers via stdio,
+ * and executes direct commands for git/system tools.
  *
- * Maintains a pool of persistent connections, one per server config.
- * Lazily connects on first tool invocation per category.
+ * Two backend types:
+ *   1. MCP server connections (file operations)
+ *   2. Direct child_process.exec (git, system commands)
  */
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -13,6 +15,10 @@ import {
 import type { ToolSchema } from "./types.js";
 import path from "node:path";
 import fs from "node:fs";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 
 // Find project root by walking up to find package.json
 function findProjectRoot(): string {
@@ -70,12 +76,65 @@ const TOOL_SERVER_MAP: Record<string, ServerConfig> = {
 
   // Browser → simulated (puppeteer MCP needs setup)
 
-  // Git → simulated (could wire to a git MCP server)
-
   // AI inference → simulated
-
-  // System → simulated
 };
+
+// ─── Direct Command Execution ───────────────────────────────────────────────
+//
+// For tools that don't need an MCP server — just shell out to local commands.
+
+interface DirectToolConfig {
+  command: string;
+  args: (payload: Record<string, unknown>) => string[];
+  cwd?: (payload: Record<string, unknown>) => string | undefined;
+  timeoutMs?: number;
+}
+
+const DIRECT_TOOL_MAP: Record<string, DirectToolConfig> = {
+  git_status: {
+    command: "git",
+    args: (p) => ["status", "--porcelain"],
+    cwd: (p) => (p.repository_path as string) ?? process.cwd(),
+    timeoutMs: 10_000,
+  },
+  git_diff: {
+    command: "git",
+    args: (p) => {
+      const target = (p.target as string) ?? "HEAD";
+      if (target === "staged") return ["diff", "--cached"];
+      if (target === "HEAD") return ["diff"];
+      return ["diff", target];
+    },
+    cwd: (p) => (p.repository_path as string) ?? process.cwd(),
+    timeoutMs: 10_000,
+  },
+  git_log: {
+    command: "git",
+    args: (p) => {
+      const count = (p.count as number) ?? 10;
+      return ["log", `--oneline`, `-n`, String(count)];
+    },
+    cwd: (p) => (p.repository_path as string) ?? process.cwd(),
+    timeoutMs: 10_000,
+  },
+  run_command: {
+    command: "sh",
+    args: (p) => ["-c", p.command as string],
+    cwd: (p) => (p.cwd as string) ?? process.cwd(),
+    timeoutMs: (p) => (p.timeout_ms as number) ?? 30_000,
+  },
+  get_environment: {
+    command: "uname",
+    args: () => ["-a"],
+    timeoutMs: 5_000,
+  },
+};
+
+// Set of all tool names with real backends (MCP or direct)
+const ALL_REAL_TOOLS = new Set([
+  ...Object.keys(TOOL_SERVER_MAP),
+  ...Object.keys(DIRECT_TOOL_MAP),
+]);
 
 // ─── Connection Pool ─────────────────────────────────────────────────────────
 
@@ -159,13 +218,20 @@ export interface ProxyResult {
 }
 
 /**
- * Forward a tool call to the real MCP server.
- * Returns null if no server is configured for this tool (use simulated fallback).
+ * Execute a tool call — checks direct tools first, then MCP servers.
+ * Returns null if no backend is configured (use simulated fallback).
  */
 export async function proxyToolCall(
   toolName: string,
   payload: Record<string, unknown>
 ): Promise<ProxyResult | null> {
+  // ── Direct execution (git, system) ──
+  const directConfig = DIRECT_TOOL_MAP[toolName];
+  if (directConfig) {
+    return executeDirect(toolName, directConfig, payload);
+  }
+
+  // ── MCP server connection (file operations) ──
   const conn = await getConnection(toolName);
   if (!conn) {
     console.error(`[proxy] No backend configured for "${toolName}"`);
@@ -209,17 +275,67 @@ export async function proxyToolCall(
 }
 
 /**
- * Check if a tool has a real backend server configured.
+ * Execute a tool via direct child_process.execFile.
+ */
+async function executeDirect(
+  toolName: string,
+  config: DirectToolConfig,
+  payload: Record<string, unknown>
+): Promise<ProxyResult> {
+  const args = config.args(payload);
+  const cwd = config.cwd?.(payload);
+  const timeoutMs =
+    typeof config.timeoutMs === "function"
+      ? config.timeoutMs(payload)
+      : config.timeoutMs ?? 30_000;
+
+  console.error(
+    `[proxy] Direct exec: ${config.command} ${args.join(" ")} (cwd=${cwd ?? "inherit"})`
+  );
+
+  try {
+    const { stdout, stderr } = await execFileAsync(config.command, args, {
+      cwd,
+      timeout: timeoutMs,
+      maxBuffer: 1024 * 1024, // 1MB
+    });
+
+    const output = [stdout, stderr].filter(Boolean).join("\n").trim();
+    return {
+      content: [{ type: "text", text: output || "(no output)" }],
+    };
+  } catch (err: unknown) {
+    const execErr = err as { code?: number; stdout?: string; stderr?: string; message?: string };
+    const output = [execErr.stdout, execErr.stderr]
+      .filter(Boolean)
+      .join("\n")
+      .trim();
+    return {
+      content: [
+        {
+          type: "text",
+          text:
+            output ||
+            `Command failed: ${config.command} ${args.join(" ")} — ${execErr.message ?? "unknown error"}`,
+        },
+      ],
+      isError: true,
+    };
+  }
+}
+
+/**
+ * Check if a tool has a real backend configured (MCP or direct).
  */
 export function hasRealBackend(toolName: string): boolean {
-  return toolName in TOOL_SERVER_MAP;
+  return ALL_REAL_TOOLS.has(toolName);
 }
 
 /**
  * Get the list of tools that have real backends.
  */
 export function getRealBackendTools(): string[] {
-  return Object.keys(TOOL_SERVER_MAP);
+  return [...ALL_REAL_TOOLS];
 }
 
 /**

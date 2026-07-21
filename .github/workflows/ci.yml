@@ -27,5 +27,8 @@ jobs:
       - name: Run tests
         run: npm test
 
+      - name: Run eval
+        run: npm run eval
+
       - name: Run benchmark
-        run: node --import tsx/esm src/benchmark.ts
+        run: npm run benchmark
