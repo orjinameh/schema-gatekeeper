@@ -28,17 +28,20 @@ export function totalRawTokens(): number {
   return REGISTRY.reduce((sum, t) => sum + rawToolTokens(t), 0);
 }
 
-/** Tokens for the 2 master tool definitions (request_skills + invoke_skill). */
+/** Tokens for the 3 master tool definitions (request_skills + invoke_skill + search_tools). */
 export function masterToolTokens(): number {
   const requestSkillsDesc =
     "Discover available tools by category. Returns compact signatures — call this before invoke_skill. Categories: " +
     CATEGORIES.join(", ");
   const invokeSkillDesc =
     "Execute a tool by name with the given arguments. Use request_skills first to discover available tools and their signatures.";
+  const searchToolsDesc =
+    "Search available tools by free-text query. Use when request_skills categories don't cover what you need, or you're unsure which category a tool belongs to.";
 
   return (
     estimateTokens(`Tool: request_skills\nDescription: ${requestSkillsDesc}\nSchema: {"type":"object","properties":{"category":{"type":"string","enum":[${CATEGORIES.map((c) => `"${c}"`).join(",")}]}}}`) +
-    estimateTokens(`Tool: invoke_skill\nDescription: ${invokeSkillDesc}\nSchema: {"type":"object","properties":{"toolName":{"type":"string"},"payload":{"type":"object"}}}`)
+    estimateTokens(`Tool: invoke_skill\nDescription: ${invokeSkillDesc}\nSchema: {"type":"object","properties":{"toolName":{"type":"string"},"payload":{"type":"object"}}}`) +
+    estimateTokens(`Tool: search_tools\nDescription: ${searchToolsDesc}\nSchema: {"type":"object","properties":{"query":{"type":"string"},"maxResults":{"type":"number"}}}`)
   );
 }
 
@@ -59,6 +62,8 @@ export interface TurnSnapshot {
   proxyTokens: number;    // cumulative tokens WITH proxy
   rawToolsLoaded: number; // total tool schemas in context
   proxyToolsLoaded: number; // compact signatures in context
+  rawToolCalls: number;   // number of tool invocations (latency proxy)
+  proxyToolCalls: number; // tool invocations through proxy (includes discovery)
 }
 
 /**
@@ -83,16 +88,19 @@ export function simulateConversation(): TurnSnapshot[] {
   rawCumulative += systemTokens;
   proxyCumulative += systemTokens;
 
+  let rawToolCalls = 0;
+  let proxyToolCalls = 0;
+
   // ── Turn 1: tools/list ──
   // WITHOUT proxy: LLM receives all 16 tool schemas
   const allRawTokens = totalRawTokens();
   rawCumulative += allRawTokens;
   rawToolsInContext = REGISTRY.length;
 
-  // WITH proxy: LLM receives 2 master tool schemas
+  // WITH proxy: LLM receives 3 master tool schemas
   const masterTokens = masterToolTokens();
   proxyCumulative += masterTokens;
-  let proxyToolsInContext = 2;
+  let proxyToolsInContext = 3;
 
   snapshots.push({
     turn: 1,
@@ -101,6 +109,8 @@ export function simulateConversation(): TurnSnapshot[] {
     proxyTokens: proxyCumulative,
     rawToolsLoaded: rawToolsInContext,
     proxyToolsLoaded: proxyToolsInContext,
+    rawToolCalls,
+    proxyToolCalls,
   });
 
   // ── Turn 2: User asks "read my test file" ──
@@ -124,6 +134,8 @@ export function simulateConversation(): TurnSnapshot[] {
     proxyTokens: proxyCumulative,
     rawToolsLoaded: rawToolsInContext,
     proxyToolsLoaded: proxyToolsInContext,
+    rawToolCalls,
+    proxyToolCalls,
   });
 
   // ── Turn 3: LLM calls read_file (or request_skills + invoke_skill) ──
@@ -135,6 +147,7 @@ export function simulateConversation(): TurnSnapshot[] {
     '{"content":[{"type":"text","text":"Hello from Schema Gatekeeper proxy test!\\n"}]}'
   );
   rawCumulative += toolCallTokens + toolResultTokens;
+  rawToolCalls += 1;
 
   // WITH proxy: LLM calls request_skills → gets catalog → calls invoke_skill
   const requestSkillsCall = estimateTokens(
@@ -145,8 +158,9 @@ export function simulateConversation(): TurnSnapshot[] {
     JSON.stringify({ name: "invoke_skill", arguments: { toolName: "read_file", payload: { path: "/tmp/gatekeeper-test.txt" } } })
   );
   proxyCumulative += requestSkillsCall + fileCatalog + invokeSkillCall + toolResultTokens;
+  proxyToolCalls += 2; // request_skills + invoke_skill
 
-  // Proxy adds 2 compact signatures to context for next turns
+  // Proxy adds 4 compact signatures to context for next turns
   proxyToolsInContext += 4; // 4 file-operations tools
 
   snapshots.push({
@@ -156,6 +170,8 @@ export function simulateConversation(): TurnSnapshot[] {
     proxyTokens: proxyCumulative,
     rawToolsLoaded: rawToolsInContext,
     proxyToolsLoaded: proxyToolsInContext,
+    rawToolCalls,
+    proxyToolCalls,
   });
 
   // ── Turn 4: User asks "query my database" ──
@@ -177,15 +193,19 @@ export function simulateConversation(): TurnSnapshot[] {
     proxyTokens: proxyCumulative,
     rawToolsLoaded: rawToolsInContext,
     proxyToolsLoaded: proxyToolsInContext,
+    rawToolCalls,
+    proxyToolCalls,
   });
 
   // ── Turn 5: LLM calls query (or request_skills + invoke_skill) ──
   rawCumulative += estimateTokens(
     JSON.stringify({ name: "query", arguments: { sql: "SELECT * FROM users" } })
   ) + toolResultTokens;
+  rawToolCalls += 1;
 
   const dbCatalog = catalogTokensForCategory("database");
   proxyCumulative += requestSkillsCall + dbCatalog + invokeSkillCall + toolResultTokens;
+  proxyToolCalls += 2;
 
   proxyToolsInContext += 2; // 2 database tools
 
@@ -196,6 +216,8 @@ export function simulateConversation(): TurnSnapshot[] {
     proxyTokens: proxyCumulative,
     rawToolsLoaded: rawToolsInContext,
     proxyToolsLoaded: proxyToolsInContext,
+    rawToolCalls,
+    proxyToolCalls,
   });
 
   return snapshots;
@@ -215,6 +237,10 @@ export interface BenchmarkSummary {
   conversationSavingsPercent: number;
   peakRawToolsInContext: number;
   peakProxyToolsInContext: number;
+  totalRawToolCalls: number;
+  totalProxyToolCalls: number;
+  estimatedRawLatencyMs: number;
+  estimatedProxyLatencyMs: number;
   turnSnapshots: TurnSnapshot[];
 }
 
@@ -224,6 +250,13 @@ export function generateBenchmarkSummary(): BenchmarkSummary {
 
   const rawTotal = totalRawTokens();
   const masterTokens = masterToolTokens();
+
+  const totalRawCalls = last.rawToolCalls;
+  const totalProxyCalls = last.proxyToolCalls;
+
+  // Latency estimate: ~200ms per tool call (LLM inference + network round-trip)
+  // Proxy adds 1 extra call per tool use (discovery step)
+  const LATENCY_PER_CALL_MS = 200;
 
   return {
     totalTools: REGISTRY.length,
@@ -241,6 +274,10 @@ export function generateBenchmarkSummary(): BenchmarkSummary {
     ),
     peakRawToolsInContext: last.rawToolsLoaded,
     peakProxyToolsInContext: last.proxyToolsLoaded,
+    totalRawToolCalls: totalRawCalls,
+    totalProxyToolCalls: totalProxyCalls,
+    estimatedRawLatencyMs: totalRawCalls * LATENCY_PER_CALL_MS,
+    estimatedProxyLatencyMs: totalProxyCalls * LATENCY_PER_CALL_MS,
     turnSnapshots: snapshots,
   };
 }

@@ -25,6 +25,7 @@ import {
   measureSavings,
 } from "./compactor.js";
 import { proxyToolCall, hasRealBackend } from "./proxy.js";
+import { searchTools } from "./search.js";
 
 // ─── Server Setup ────────────────────────────────────────────────────────────
 
@@ -182,6 +183,42 @@ server.registerTool(
   }
 );
 
+// ─── Tool 3: search_tools ────────────────────────────────────────────────────
+//
+// Fuzzy/keyword search over tool names and descriptions.
+// Use when categories don't fit or the agent doesn't know the taxonomy.
+
+server.registerTool(
+  "search_tools",
+  {
+    title: "Search Tools",
+    description:
+      "Search available tools by free-text query. Use when request_skills categories don't cover what you need, or you're unsure which category a tool belongs to.",
+    inputSchema: {
+      query: z
+        .string()
+        .describe(
+          "Free-text search query (e.g. 'file read', 'sql query', 'screenshot')"
+        ),
+      maxResults: z
+        .number()
+        .optional()
+        .default(5)
+        .describe("Maximum number of results to return (default 5)"),
+    },
+  },
+  async ({ query, maxResults }) => {
+    const result = searchTools(query, maxResults);
+
+    const header = `## Search: "${result.query}" (${result.matchCount} matches)`;
+    const response = [header, "", result.catalog].join("\n");
+
+    return {
+      content: [{ type: "text" as const, text: response }],
+    };
+  }
+);
+
 // ─── Launch ──────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -191,7 +228,7 @@ async function main() {
   // Log startup metrics to stderr (not stdout — that's for MCP protocol)
   const savings = measureSavings(REGISTRY);
   console.error(
-    `[schema-gatekeeper] Running. ${REGISTRY.length} tools registered across ${CATEGORIES.length} categories.`
+    `[schema-gatekeeper] Running. ${REGISTRY.length} tools registered across ${CATEGORIES.length} categories. 3 gateway tools exposed.`
   );
   console.error(
     `[schema-gatekeeper] Token savings: ~${savings.originalTokens} → ~${savings.compactedTokens} (${savings.savingsPercent}% reduction)`

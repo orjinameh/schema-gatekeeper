@@ -14,11 +14,11 @@
     1994
   ],
   "proxy": [
-    180,
-    211,
-    387,
-    411,
-    534
+    252,
+    283,
+    459,
+    483,
+    606
   ],
   "descriptions": [
     "System loads tools (tools/list)",
@@ -27,10 +27,28 @@
     "User: 'Query my database'",
     "Tool execution: query"
   ],
+  "rawToolCalls": [
+    0,
+    0,
+    1,
+    1,
+    2
+  ],
+  "proxyToolCalls": [
+    0,
+    0,
+    2,
+    2,
+    4
+  ],
   "summary": {
-    "upfrontSavings": 91,
-    "conversationSavings": 73,
+    "upfrontSavings": 88,
+    "conversationSavings": 70,
     "totalTools": 16,
-    "categories": 7
+    "categories": 7,
+    "totalRawToolCalls": 2,
+    "totalProxyToolCalls": 4,
+    "estimatedRawLatencyMs": 400,
+    "estimatedProxyLatencyMs": 800
   }
 }

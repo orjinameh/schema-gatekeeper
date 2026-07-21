@@ -75,17 +75,34 @@ function main() {
   console.log(`  Final tokens (raw):      ${formatNumber(s.finalRawTokens)}`);
   console.log(`  Final tokens (proxy):    ${formatNumber(s.finalProxyTokens)}`);
 
+  // ── Latency Tradeoff ──
+  console.log("\n── LATENCY TRADEOFF ───────────────────────────────────────\n");
+  console.log(`  Tool calls (raw path):     ${s.totalRawToolCalls} calls`);
+  console.log(`  Tool calls (proxy path):   ${s.totalProxyToolCalls} calls (+${s.totalProxyToolCalls - s.totalRawToolCalls} discovery round-trips)`);
+  console.log(`  Estimated latency (raw):   ~${s.estimatedRawLatencyMs}ms`);
+  console.log(`  Estimated latency (proxy): ~${s.estimatedProxyLatencyMs}ms`);
+  console.log(`  Latency overhead:          +${s.estimatedProxyLatencyMs - s.estimatedRawLatencyMs}ms per conversation`);
+  console.log(`  Note: 1 extra round-trip per tool use for category discovery.`);
+  console.log(`  For simple one-shot tasks, this is a net latency cost.`);
+  console.log(`  For multi-turn conversations with many tools, token savings dominate.`);
+
   // ── JSON export for charting ──
   const chartData = {
     labels: s.turnSnapshots.map((t) => `Turn ${t.turn}`),
     raw: s.turnSnapshots.map((t) => t.rawTokens),
     proxy: s.turnSnapshots.map((t) => t.proxyTokens),
     descriptions: s.turnSnapshots.map((t) => t.description),
+    rawToolCalls: s.turnSnapshots.map((t) => t.rawToolCalls),
+    proxyToolCalls: s.turnSnapshots.map((t) => t.proxyToolCalls),
     summary: {
       upfrontSavings: s.upfrontSavingsPercent,
       conversationSavings: s.conversationSavingsPercent,
       totalTools: s.totalTools,
       categories: s.categories,
+      totalRawToolCalls: s.totalRawToolCalls,
+      totalProxyToolCalls: s.totalProxyToolCalls,
+      estimatedRawLatencyMs: s.estimatedRawLatencyMs,
+      estimatedProxyLatencyMs: s.estimatedProxyLatencyMs,
     },
   };
 

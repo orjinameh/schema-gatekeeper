@@ -33,8 +33,8 @@ async function main() {
   console.log(`[PASS] tools/list returned ${tools.length} tools (expected 2)`);
   console.log(`       Tools: ${tools.map((t) => t.name).join(", ")}`);
 
-  if (tools.length !== 2) {
-    console.error("[FAIL] Expected exactly 2 tools");
+  if (tools.length !== 3) {
+    console.error("[FAIL] Expected exactly 3 tools (request_skills, invoke_skill, search_tools)");
     process.exit(1);
   }
 
@@ -154,6 +154,37 @@ async function main() {
       : "";
   const hasNotFound = unknownResult.isError && unknownText.includes("not found");
   console.log(`[PASS] invoke_skill(unknown) → not found=${hasNotFound}`);
+
+  // Test 8: search_tools — keyword search
+  const searchResult = await client.callTool({
+    name: "search_tools",
+    arguments: { query: "file read" },
+  });
+  const searchText =
+    "content" in searchResult
+      ? (searchResult.content as Array<{ type: string; text: string }>)
+          .map((c) => c.text)
+          .join("")
+      : "";
+  const hasSearchResults = searchText.includes("read_file");
+  const hasMatchCount = searchText.includes("matches");
+  console.log(
+    `[PASS] search_tools("file read") → found read_file=${hasSearchResults}, match count=${hasMatchCount}`
+  );
+
+  // Test 9: search_tools — no results
+  const noResult = await client.callTool({
+    name: "search_tools",
+    arguments: { query: "quantum entanglement" },
+  });
+  const noResultText =
+    "content" in noResult
+      ? (noResult.content as Array<{ type: string; text: string }>)
+          .map((c) => c.text)
+          .join("")
+      : "";
+  const hasNoMatches = noResultText.includes("No tools matched");
+  console.log(`[PASS] search_tools("quantum entanglement") → no matches=${hasNoMatches}`);
 
   await transport.close();
 
