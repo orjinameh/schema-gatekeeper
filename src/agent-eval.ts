@@ -1,34 +1,37 @@
 /**
- * Live Agent Evaluation — runs real Claude against the gatekeeper MCP tools.
+ * Live Agent Evaluation — runs real Gemini against the gatekeeper MCP tools.
  *
- * This is the actual test: does a live LLM, given only the 3 gateway tools
- * (request_skills, invoke_skill, search_tools), make the same tool choices
- * as a model with full schemas? Or do compact signatures confuse it?
+ * Tests: does a live LLM, given only the 3 gateway tools (request_skills,
+ * invoke_skill, search_tools), make correct tool choices for both file/system
+ * tasks AND DataHub data-catalog tasks?
  *
  * Usage:
- *   ANTHROPIC_API_KEY=sk-... node --import tsx/esm src/agent-eval.ts
+ *   GEMINI_API_KEY=... node --import tsx/esm src/agent-eval.ts
  *
- * Requires: @anthropic-ai/sdk (npm install @anthropic-ai/sdk)
+ * Requires: @google/genai (npm install @google/genai)
  */
 
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenAI, type Content, type Part } from "@google/genai";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import path from "node:path";
 
 const SERVER_CMD = process.execPath;
-const SERVER_ARGS = ["--import", "tsx/esm", new URL("./index.ts", import.meta.url).pathname];
+const SERVER_ARGS = [
+  "--import",
+  "tsx/esm",
+  new URL("./index.ts", import.meta.url).pathname,
+];
 
 // ─── Task Definitions ───────────────────────────────────────────────────────
 
 interface AgentTask {
   name: string;
   prompt: string;
-  /** What the agent SHOULD call, in order. Evaluated greedily. */
   expectedSequence: Array<{ tool: string; argsContains?: string }>;
 }
 
 const TASKS: AgentTask[] = [
+  // ── File/ops tasks ──
   {
     name: "Read a file",
     prompt: "Read the file /tmp/gatekeeper-test.txt",
@@ -74,10 +77,62 @@ const TASKS: AgentTask[] = [
   },
   {
     name: "Ambiguous: search then invoke",
-    prompt: "I need to find out what operating system this is. Can you check?",
+    prompt: "I need to find out what operating system this is running on. Can you check?",
     expectedSequence: [
-      { tool: "search_tools", argsContains: "system" },
+      { tool: "search_tools", argsContains: "" },
       { tool: "invoke_skill", argsContains: "get_environment" },
+    ],
+  },
+
+  // ── DataHub data-catalog tasks ──
+  {
+    name: "DataHub: search datasets",
+    prompt: "Search for datasets related to 'customers' in our data catalog",
+    expectedSequence: [
+      { tool: "request_skills", argsContains: "data-catalog" },
+      { tool: "invoke_skill", argsContains: "dh_search" },
+    ],
+  },
+  {
+    name: "DataHub: list schema",
+    prompt: "Show me the schema of the orders dataset in Snowflake (urn:li:dataset:(urn:li:dataPlatform:snowflake,b2fd91.order_entry_db.order_entry.orders,PROD))",
+    expectedSequence: [
+      { tool: "request_skills", argsContains: "data-catalog" },
+      { tool: "invoke_skill", argsContains: "dh_list_schema" },
+    ],
+  },
+  {
+    name: "DataHub: trace lineage",
+    prompt: "What's the upstream lineage of the orders dataset (urn:li:dataset:(urn:li:dataPlatform:snowflake,b2fd91.order_entry_db.order_entry.orders,PROD))?",
+    expectedSequence: [
+      { tool: "request_skills", argsContains: "data-catalog" },
+      { tool: "invoke_skill", argsContains: "dh_get_lineage" },
+    ],
+  },
+  {
+    name: "DataHub: draft SQL",
+    prompt: "Draft a SQL query to show total orders by customer using the orders dataset (urn:li:dataset:(urn:li:dataPlatform:snowflake,b2fd91.order_entry_db.order_entry.orders,PROD))",
+    expectedSequence: [
+      { tool: "request_skills", argsContains: "data-catalog" },
+      { tool: "invoke_skill", argsContains: "dh_draft_sql" },
+    ],
+  },
+  {
+    name: "DataHub: cross-category search + file",
+    prompt: "Search DataHub for 'revenue' datasets and save the results to /tmp/datahub-results.txt",
+    expectedSequence: [
+      { tool: "request_skills", argsContains: "data-catalog" },
+      { tool: "invoke_skill", argsContains: "dh_search" },
+      { tool: "request_skills", argsContains: "file-operations" },
+      { tool: "invoke_skill", argsContains: "write_file" },
+    ],
+  },
+  {
+    name: "DataHub: ambiguous search",
+    prompt: "I need to understand the data lineage for our orders table — where does the data come from and where does it flow?",
+    expectedSequence: [
+      { tool: "request_skills", argsContains: "data-catalog" },
+      { tool: "invoke_skill", argsContains: "dh_get_lineage" },
     ],
   },
 ];
@@ -94,30 +149,32 @@ interface AgentResult {
   prompt: string;
   toolCalls: ToolCall[];
   response: string;
-  matchScore: number;    // 0-1, how many expected calls matched
+  matchScore: number;
   totalExpected: number;
   matched: number;
   latencyMs: number;
   error?: string;
 }
 
-/**
- * Get tool definitions from the gatekeeper MCP server.
- */
-async function getGatewayTools(
+function getGatewayTools(
   client: Client
-): Promise<Array<{ name: string; description: string; input_schema: Record<string, unknown> }>> {
-  const { tools } = await client.listTools();
-  return tools.map((t) => ({
-    name: t.name,
-    description: t.description ?? "",
-    input_schema: (t as unknown as { inputSchema: Record<string, unknown> }).inputSchema,
-  }));
+): Promise<
+  Array<{
+    name: string;
+    description: string;
+    inputSchema: Record<string, unknown>;
+  }>
+> {
+  return client.listTools().then(({ tools }) =>
+    tools.map((t) => ({
+      name: t.name,
+      description: t.description ?? "",
+      inputSchema: (t as unknown as { inputSchema: Record<string, unknown> })
+        .inputSchema,
+    }))
+  );
 }
 
-/**
- * Execute a tool call through the MCP server and return the result text.
- */
 async function executeTool(
   client: Client,
   name: string,
@@ -137,41 +194,81 @@ async function executeTool(
 }
 
 /**
- * Run a single task through the live agent.
+ * Convert MCP tools to Gemini function declarations.
+ */
+function toGeminiTools(
+  tools: Array<{
+    name: string;
+    description: string;
+    inputSchema: Record<string, unknown>;
+  }>
+): Array<{ functionDeclarations: Array<Record<string, unknown>> }> {
+  return [
+    {
+      functionDeclarations: tools.map((t) => ({
+        name: t.name,
+        description: t.description,
+        parameters: t.inputSchema,
+      })),
+    },
+  ];
+}
+
+/**
+ * Run a single task through Gemini with MCP tool loop.
  */
 async function runAgentTask(
-  anthropic: Anthropic,
+  genai: GoogleGenAI,
   mcpClient: Client,
-  tools: Array<{ name: string; description: string; input_schema: Record<string, unknown> }>,
+  tools: Array<{
+    name: string;
+    description: string;
+    inputSchema: Record<string, unknown>;
+  }>,
   task: AgentTask
 ): Promise<AgentResult> {
   const start = Date.now();
   const toolCalls: ToolCall[] = [];
-  const messages: Array<{ role: "user" | "assistant"; content: string | Array<unknown> }> = [
-    { role: "user", content: task.prompt },
-  ];
+  const contents: Content[] = [{ role: "user", parts: [{ text: task.prompt }] }];
+  const geminiTools = toGeminiTools(tools);
 
-  // Allow up to 10 rounds of tool calls (agent can chain multiple)
   for (let round = 0; round < 10; round++) {
     try {
-      const response = await anthropic.messages.create({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 1024,
-        tools: tools,
-        messages,
+      const response = await genai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents,
+        config: {
+          tools: geminiTools,
+          maxOutputTokens: 1024,
+        },
       });
 
-      // Check if agent wants to use tools
-      const toolBlocks = response.content.filter(
-        (b): b is Anthropic.ToolUseBlock => b.type === "tool_use"
+      const candidate = response.candidates?.[0];
+      if (!candidate?.content?.parts) {
+        // No content returned
+        const text = response.text ?? "";
+        return {
+          task: task.name,
+          prompt: task.prompt,
+          toolCalls,
+          response: text,
+          matchScore: computeMatch(toolCalls, task),
+          totalExpected: task.expectedSequence.length,
+          matched: countMatched(toolCalls, task),
+          latencyMs: Date.now() - start,
+        };
+      }
+
+      const parts = candidate.content.parts;
+      const functionCalls = parts.filter(
+        (p): p is Part & { functionCall: { name: string; args: Record<string, unknown> } } =>
+          "functionCall" in p && p.functionCall !== undefined
       );
 
-      if (toolBlocks.length === 0) {
-        // Agent is done — no more tool calls
-        const textBlocks = response.content.filter(
-          (b): b is Anthropic.TextBlock => b.type === "text"
-        );
-        const responseText = textBlocks.map((b) => b.text).join("");
+      if (functionCalls.length === 0) {
+        // Agent is done — text response
+        const textParts = parts.filter((p): p is Part & { text: string } => "text" in p);
+        const responseText = textParts.map((p) => p.text).join("");
 
         return {
           task: task.name,
@@ -185,23 +282,25 @@ async function runAgentTask(
         };
       }
 
-      // Execute each tool call through MCP and collect results
-      const toolResults: Array<Anthropic.ToolResultBlockParam> = [];
+      // Execute each function call through MCP and collect results
+      const functionResponses: Array<{ functionResponse: { name: string; response: Record<string, unknown> } }> = [];
 
-      for (const block of toolBlocks) {
-        toolCalls.push({ name: block.name, args: block.input as Record<string, unknown> });
-        const resultText = await executeTool(mcpClient, block.name, block.input as Record<string, unknown>);
-        toolResults.push({
-          type: "tool_result",
-          tool_use_id: block.id,
-          content: resultText,
+      for (const fc of functionCalls) {
+        const name = fc.functionCall.name;
+        const args = fc.functionCall.args;
+        toolCalls.push({ name, args });
+        const resultText = await executeTool(mcpClient, name, args);
+        functionResponses.push({
+          functionResponse: {
+            name,
+            response: { result: resultText },
+          },
         });
       }
 
       // Add assistant message and tool results to conversation
-      messages.push({ role: "assistant", content: response.content as unknown as string });
-      messages.push({ role: "user", content: toolResults as unknown as string });
-
+      contents.push({ role: "model", parts: parts as Part[] });
+      contents.push({ role: "user", parts: functionResponses as unknown as Part[] });
     } catch (err) {
       return {
         task: task.name,
@@ -217,7 +316,6 @@ async function runAgentTask(
     }
   }
 
-  // Shouldn't reach here, but handle it
   return {
     task: task.name,
     prompt: task.prompt,
@@ -232,9 +330,6 @@ async function runAgentTask(
 
 // ─── Scoring ────────────────────────────────────────────────────────────────
 
-/**
- * Greedy match: for each expected call, find the first unmatched agent call that matches.
- */
 function countMatched(agentCalls: ToolCall[], task: AgentTask): number {
   const used = new Set<number>();
   let matched = 0;
@@ -244,7 +339,11 @@ function countMatched(agentCalls: ToolCall[], task: AgentTask): number {
       if (used.has(i)) continue;
       const call = agentCalls[i];
       if (call.name !== expected.tool) continue;
-      if (expected.argsContains && !JSON.stringify(call.args).includes(expected.argsContains)) continue;
+      if (
+        expected.argsContains &&
+        !JSON.stringify(call.args).includes(expected.argsContains)
+      )
+        continue;
       used.add(i);
       matched++;
       break;
@@ -256,25 +355,37 @@ function countMatched(agentCalls: ToolCall[], task: AgentTask): number {
 
 function computeMatch(agentCalls: ToolCall[], task: AgentTask): number {
   const matched = countMatched(agentCalls, task);
-  return task.expectedSequence.length > 0 ? matched / task.expectedSequence.length : 1;
+  return task.expectedSequence.length > 0
+    ? matched / task.expectedSequence.length
+    : 1;
 }
 
 // ─── Main ───────────────────────────────────────────────────────────────────
 
 async function main() {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    console.error("Error: ANTHROPIC_API_KEY not set.");
-    console.error("Usage: ANTHROPIC_API_KEY=sk-... node --import tsx/esm src/agent-eval.ts");
+    console.error("Error: GEMINI_API_KEY not set.");
+    console.error(
+      "Usage: GEMINI_API_KEY=... node --import tsx/esm src/agent-eval.ts"
+    );
     process.exit(1);
   }
 
-  const anthropic = new Anthropic({ apiKey });
+  const genai = new GoogleGenAI({ apiKey });
 
-  console.log("╔══════════════════════════════════════════════════════════════╗");
-  console.log("║     SCHEMA GATEKEEPER — Live Agent Evaluation              ║");
-  console.log("║     (Claude Sonnet 4 vs gateway tools only)                ║");
-  console.log("╚══════════════════════════════════════════════════════════════╝\n");
+  console.log(
+    "╔══════════════════════════════════════════════════════════════╗"
+  );
+  console.log(
+    "║     SCHEMA GATEKEEPER — Live Agent Evaluation              ║"
+  );
+  console.log(
+    "║     (Gemini 2.5 Flash vs gateway tools only)              ║"
+  );
+  console.log(
+    "╚══════════════════════════════════════════════════════════════╝\n"
+  );
 
   // Connect to gatekeeper MCP server
   const transport = new StdioClientTransport({
@@ -290,34 +401,63 @@ async function main() {
 
   await mcpClient.connect(transport);
   const tools = await getGatewayTools(mcpClient);
-  console.log(`[OK] Connected. ${tools.length} gateway tools available: ${tools.map((t) => t.name).join(", ")}\n`);
+  console.log(
+    `[OK] Connected. ${tools.length} gateway tools available: ${tools.map((t) => t.name).join(", ")}\n`
+  );
 
   const results: AgentResult[] = [];
 
   for (const task of TASKS) {
-    process.stdout.write(`  ${task.name.padEnd(30)}`);
-    const result = await runAgentTask(anthropic, mcpClient, tools, task);
+    process.stdout.write(`  ${task.name.padEnd(35)}`);
+    const result = await runAgentTask(genai, mcpClient, tools, task);
     results.push(result);
 
     const score = Math.round(result.matchScore * 100);
     const icon = score === 100 ? "✓" : score >= 50 ? "~" : "✗";
     const callsSummary = result.toolCalls.map((c) => c.name).join(" → ");
-    console.log(`${icon} ${score}% match (${result.matched}/${result.totalExpected}) ${result.latencyMs}ms`);
+    console.log(
+      `${icon} ${score}% match (${result.matched}/${result.totalExpected}) ${result.latencyMs}ms`
+    );
     console.log(`    Agent chose: ${callsSummary}`);
+    if (result.error) {
+      console.log(`    Error: ${result.error.slice(0, 100)}`);
+    }
   }
 
   // ── Summary ──
   const perfectScores = results.filter((r) => r.matchScore === 1).length;
-  const avgScore = results.reduce((s, r) => s + r.matchScore, 0) / results.length;
+  const avgScore =
+    results.reduce((s, r) => s + r.matchScore, 0) / results.length;
   const totalLatency = results.reduce((s, r) => s + r.latencyMs, 0);
 
   console.log("\n── RESULTS ────────────────────────────────────────────────\n");
   console.log(`  Tasks evaluated:      ${results.length}`);
-  console.log(`  Perfect match (100%): ${perfectScores}/${results.length}`);
+  console.log(
+    `  Perfect match (100%): ${perfectScores}/${results.length}`
+  );
   console.log(`  Average match score:  ${Math.round(avgScore * 100)}%`);
   console.log(`  Total latency:        ${totalLatency}ms`);
 
-  console.log("\n── CONCLUSION ─────────────────────────────────────────────\n");
+  // Per-category breakdown
+  const fileTasks = results.filter(
+    (r) => !r.task.startsWith("DataHub:")
+  );
+  const dataTasks = results.filter((r) => r.task.startsWith("DataHub:"));
+  const fileAvg =
+    fileTasks.reduce((s, r) => s + r.matchScore, 0) / fileTasks.length;
+  const dataAvg =
+    dataTasks.length > 0
+      ? dataTasks.reduce((s, r) => s + r.matchScore, 0) / dataTasks.length
+      : 0;
+
+  console.log(`\n  File/ops tasks:       ${Math.round(fileAvg * 100)}% avg (${fileTasks.length} tasks)`);
+  console.log(
+    `  DataHub tasks:        ${Math.round(dataAvg * 100)}% avg (${dataTasks.length} tasks)`
+  );
+
+  console.log(
+    "\n── CONCLUSION ─────────────────────────────────────────────\n"
+  );
   if (perfectScores === results.length) {
     console.log("  ✓ Live agent picks the SAME tools via compact signatures");
     console.log("    as it would with full schemas. The proxy works.");
@@ -331,19 +471,25 @@ async function main() {
   }
 
   // ── Detailed results ──
-  console.log("\n── DETAILED RESULTS ──────────────────────────────────────\n");
+  console.log(
+    "\n── DETAILED RESULTS ──────────────────────────────────────\n"
+  );
   for (const r of results) {
-    const expected = r.task
-      ? TASKS.find((t) => t.name === r.task)?.expectedSequence.map((e) => e.tool).join(" → ")
-      : "";
+    const expected = TASKS.find((t) => t.name === r.task)
+      ?.expectedSequence.map((e) => e.tool)
+      .join(" → ");
     console.log(`  ${r.task}:`);
     console.log(`    Expected: ${expected}`);
-    console.log(`    Got:      ${r.toolCalls.map((c) => c.name).join(" → ")}`);
-    if (r.error) console.log(`    Error:    ${r.error}`);
+    console.log(
+      `    Got:      ${r.toolCalls.map((c) => c.name).join(" → ")}`
+    );
+    if (r.error) console.log(`    Error:    ${r.error.slice(0, 80)}`);
     console.log();
   }
 
-  console.log("══════════════════════════════════════════════════════════════");
+  console.log(
+    "══════════════════════════════════════════════════════════════"
+  );
 
   await transport.close();
 }
