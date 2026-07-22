@@ -15,6 +15,7 @@ import {
 } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { ToolSchema } from "./types.js";
+import { isDataHubTool, executeDataHubTool } from "./datahub-client.js";
 import path from "node:path";
 import fs from "node:fs";
 import { execFile } from "node:child_process";
@@ -288,7 +289,7 @@ const DIRECT_TOOL_MAP: Record<string, DirectToolConfig> = {
   },
 };
 
-// Set of all tool names with real backends (MCP or direct)
+// Set of all tool names with real backends (MCP, direct exec, or DataHub GraphQL)
 const ALL_REAL_TOOLS = new Set([
   ...Object.keys(TOOL_SERVER_MAP),
   ...Object.keys(TOOL_HTTP_MAP),
@@ -442,13 +443,34 @@ export async function proxyToolCall(
   toolName: string,
   payload: Record<string, unknown>
 ): Promise<ProxyResult | null> {
+  // ── Direct DataHub GraphQL (fast, no Python dependency) ──
+  if (isDataHubTool(toolName)) {
+    console.error(`[proxy] DataHub direct: ${toolName}`);
+    try {
+      const text = await executeDataHubTool(toolName, payload);
+      if (text !== null) {
+        return { content: [{ type: "text", text }] };
+      }
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `DataHub error (${toolName}): ${err instanceof Error ? err.message : String(err)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+
   // ── Direct execution (git, system) ──
   const directConfig = DIRECT_TOOL_MAP[toolName];
   if (directConfig) {
     return executeDirect(toolName, directConfig, payload);
   }
 
-  // ── MCP server connection (file operations) ──
+  // ── MCP server connection (file operations, HTTP backends) ──
   const conn = await getConnection(toolName);
   if (!conn) {
     console.error(`[proxy] No backend configured for "${toolName}"`);
@@ -558,14 +580,15 @@ async function executeDirect(
  * Check if a tool has a real backend configured (MCP or direct).
  */
 export function hasRealBackend(toolName: string): boolean {
-  return ALL_REAL_TOOLS.has(toolName);
+  return ALL_REAL_TOOLS.has(toolName) || isDataHubTool(toolName);
 }
 
 /**
  * Get the list of tools that have real backends.
  */
 export function getRealBackendTools(): string[] {
-  return [...ALL_REAL_TOOLS];
+  const dhTools = ["dh_search","dh_get_entities","dh_list_schema","dh_get_lineage","dh_lineage_paths","dh_get_queries","dh_draft_sql","dh_add_tags","dh_add_terms","dh_update_desc","dh_search_docs","dh_save_doc"];
+  return [...ALL_REAL_TOOLS, ...dhTools];
 }
 
 /**
