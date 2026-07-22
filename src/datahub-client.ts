@@ -255,6 +255,9 @@ export async function dhListSchema(args: {
   }
 
   const ds = data.dataset;
+  if (!ds.schemaMetadata) {
+    return JSON.stringify({ error: `No schema metadata for ${args.urn} (entity type may not support schemas)` });
+  }
   const fields = ds.schemaMetadata.fields.map((f) => ({
     path: f.fieldPath,
     type: f.nativeDataType ?? f.type,
