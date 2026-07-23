@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Schema Gatekeeper — MCP Tool Schema Proxy</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace; background: #0a0a0a; color: #e0e0e0; line-height: 1.6; }
+  .container { max-width: 900px; margin: 0 auto; padding: 2rem; }
+  h1 { font-size: 2rem; color: #fff; margin-bottom: 0.5rem; }
+  h1 span { color: #4ade80; }
+  .subtitle { color: #888; font-size: 0.95rem; margin-bottom: 2rem; }
+  .badge { display: inline-block; background: #166534; color: #4ade80; padding: 0.2rem 0.6rem; border-radius: 4px; font-size: 0.75rem; margin-left: 0.5rem; }
+
+  .section { margin-bottom: 2.5rem; }
+  .section-title { color: #38bdf8; font-size: 1.1rem; margin-bottom: 1rem; border-bottom: 1px solid #1e293b; padding-bottom: 0.5rem; }
+
+  .comparison { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 2rem; }
+  .card { background: #111; border: 1px solid #1e293b; border-radius: 8px; padding: 1.2rem; }
+  .card.bad { border-color: #7f1d1d; }
+  .card.good { border-color: #166534; }
+  .card-label { font-size: 0.75rem; text-transform: uppercase; color: #888; margin-bottom: 0.5rem; }
+  .card-value { font-size: 1.8rem; font-weight: bold; }
+  .card.bad .card-value { color: #f87171; }
+  .card.good .card-value { color: #4ade80; }
+  .card-detail { font-size: 0.8rem; color: #666; margin-top: 0.3rem; }
+
+  .stats { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 2rem; }
+  .stat { background: #111; border: 1px solid #1e293b; border-radius: 8px; padding: 1rem 1.5rem; flex: 1; min-width: 150px; }
+  .stat-value { font-size: 1.5rem; font-weight: bold; color: #4ade80; }
+  .stat-label { font-size: 0.75rem; color: #888; }
+
+  .tool-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 0.5rem; margin-bottom: 1rem; }
+  .tool-btn { background: #1a1a2e; border: 1px solid #334155; border-radius: 6px; padding: 0.6rem; cursor: pointer; text-align: center; transition: all 0.15s; }
+  .tool-btn:hover { border-color: #4ade80; background: #0f2e1a; }
+  .tool-btn.active { border-color: #4ade80; background: #166534; }
+  .tool-btn .name { font-size: 0.8rem; color: #e0e0e0; }
+  .tool-btn .count { font-size: 0.65rem; color: #888; }
+
+  .output { background: #0d1117; border: 1px solid #1e293b; border-radius: 8px; padding: 1rem; font-size: 0.8rem; white-space: pre-wrap; overflow-x: auto; min-height: 100px; max-height: 400px; overflow-y: auto; }
+  .output .error { color: #f87171; }
+  .output .success { color: #4ade80; }
+  .output .dim { color: #666; }
+
+  .input-row { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+  .input-row input { flex: 1; background: #0d1117; border: 1px solid #334155; border-radius: 6px; padding: 0.6rem 1rem; color: #e0e0e0; font-family: inherit; font-size: 0.85rem; }
+  .input-row input:focus { outline: none; border-color: #4ade80; }
+  .btn { background: #166534; border: none; border-radius: 6px; padding: 0.6rem 1.2rem; color: #4ade80; font-family: inherit; font-size: 0.85rem; cursor: pointer; font-weight: bold; }
+  .btn:hover { background: #15803d; }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .category-label { font-size: 0.7rem; color: #4ade80; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.3rem; }
+
+  pre { font-size: 0.8rem; line-height: 1.5; }
+  code { font-family: inherit; }
+
+  .footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid #1e293b; color: #555; font-size: 0.75rem; text-align: center; }
+  .footer a { color: #38bdf8; text-decoration: none; }
+
+  @media (max-width: 600px) {
+    .comparison { grid-template-columns: 1fr; }
+    .stats { flex-direction: column; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Schema <span>Gatekeeper</span></h1>
+  <p class="subtitle">MCP Tool Schema Proxy — strips tool bloat, streams only what the agent needs.</p>
+
+  <div class="stats">
+    <div class="stat"><div class="stat-value" id="token-savings">—</div><div class="stat-label">Token savings (upfront)</div></div>
+    <div class="stat"><div class="stat-value" id="total-tools">—</div><div class="stat-label">Total tools registered</div></div>
+    <div class="stat"><div class="stat-value" id="gateway-tools">3</div><div class="stat-label">Gateway tools exposed</div></div>
+    <div class="stat"><div class="stat-value" id="categories">—</div><div class="stat-label">Categories</div></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Before vs After</div>
+    <div class="comparison">
+      <div class="card bad">
+        <div class="card-label">Without proxy (raw tools/list)</div>
+        <div class="card-value" id="raw-tokens">—</div>
+        <div class="card-detail">28 full JSON schemas loaded upfront</div>
+      </div>
+      <div class="card good">
+        <div class="card-label">With Schema Gatekeeper</div>
+        <div class="card-value" id="proxy-tokens">—</div>
+        <div class="card-detail">3 compact gateway tools</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Tool Discovery</div>
+    <p style="color:#888; font-size:0.85rem; margin-bottom:1rem;">Click a category to see compact tool signatures (what the LLM sees):</p>
+    <div class="tool-grid" id="category-grid"></div>
+    <div class="output" id="discover-output"><span class="dim">Click a category above to discover tools...</span></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Tool Execution</div>
+    <p style="color:#888; font-size:0.85rem; margin-bottom:1rem;">Execute a tool through the proxy (real backend execution):</p>
+    <div class="input-row">
+      <input id="invoke-tool" placeholder="tool name (e.g. read_file)" value="read_file">
+    </div>
+    <div class="input-row">
+      <input id="invoke-args" placeholder='args JSON (e.g. {"path":"package.json"})' value='{"path":"package.json"}'>
+      <button class="btn" onclick="invokeTool()">Execute</button>
+    </div>
+    <div class="output" id="invoke-output"><span class="dim">Click Execute to run a tool...</span></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Keyword Search</div>
+    <div class="input-row">
+      <input id="search-query" placeholder="search for tools by keyword (e.g. database query)">
+      <button class="btn" onclick="searchTools()">Search</button>
+    </div>
+    <div class="output" id="search-output"><span class="dim">Type a query and click Search...</span></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">28 Tools Across 8 Categories</div>
+    <table style="width:100%; font-size:0.8rem; border-collapse:collapse;">
+      <thead>
+        <tr style="border-bottom:1px solid #1e293b; color:#888;">
+          <th style="text-align:left; padding:0.5rem;">Category</th>
+          <th style="text-align:left; padding:0.5rem;">Tools</th>
+          <th style="text-align:left; padding:0.5rem;">Backend</th>
+        </tr>
+      </thead>
+      <tbody id="tool-table"></tbody>
+    </table>
+  </div>
+
+  <div class="footer">
+    Built for <a href="https://datahub.devpost.com/" target="_blank">Build with DataHub: The Agent Hackathon</a> — deadline Aug 10, 2026
+  </div>
+</div>
+
+<script>
+const CATEGORIES = {
+  'file-operations': { count: 4, backend: 'Real (MCP)', tools: ['read_file','write_file','list_directory','search_files'] },
+  'data-catalog': { count: 12, backend: 'Real (DataHub GraphQL)', tools: ['dh_search','dh_get_entities','dh_list_schema','dh_get_lineage','dh_lineage_paths','dh_get_queries','dh_draft_sql','dh_add_tags','dh_add_terms','dh_update_desc','dh_search_docs','dh_save_doc'] },
+  'git': { count: 3, backend: 'Real (child_process)', tools: ['git_status','git_diff','git_log'] },
+  'system': { count: 2, backend: 'Real (child_process)', tools: ['run_command','get_environment'] },
+  'database': { count: 3, backend: 'Simulated', tools: ['query','list_tables','describe_table'] },
+  'web-search': { count: 2, backend: 'Simulated', tools: ['web_search','fetch_url'] },
+  'browser': { count: 4, backend: 'Simulated', tools: ['open_page','click_element','screenshot','evaluate_js'] },
+  'ai-inference': { count: 2, backend: 'Simulated', tools: ['generate_text','summarize'] },
+};
+
+// Populate stats
+const totalTools = Object.values(CATEGORIES).reduce((s, c) => s + c.count, 0);
+const totalCats = Object.keys(CATEGORIES).length;
+document.getElementById('total-tools').textContent = totalTools;
+document.getElementById('categories').textContent = totalCats;
+document.getElementById('raw-tokens').textContent = '~3,636';
+document.getElementById('proxy-tokens').textContent = '~238';
+document.getElementById('token-savings').textContent = '93%';
+
+// Populate category grid
+const grid = document.getElementById('category-grid');
+Object.entries(CATEGORIES).forEach(([name, cat]) => {
+  const btn = document.createElement('div');
+  btn.className = 'tool-btn';
+  btn.innerHTML = `<div class="name">${name}</div><div class="count">${cat.count} tools</div>`;
+  btn.onclick = () => discoverCategory(name, btn);
+  grid.appendChild(btn);
+});
+
+// Populate tool table
+const tbody = document.getElementById('tool-table');
+Object.entries(CATEGORIES).forEach(([name, cat]) => {
+  const tr = document.createElement('tr');
+  tr.style.borderBottom = '1px solid #1e293b';
+  const backendColor = cat.backend.startsWith('Real') ? '#4ade80' : '#f87171';
+  tr.innerHTML = `
+    <td style="padding:0.5rem; color:#e0e0e0;">${name}</td>
+    <td style="padding:0.5rem; color:#888;">${cat.tools.join(', ')}</td>
+    <td style="padding:0.5rem; color:${backendColor};">${cat.backend}</td>
+  `;
+  tbody.appendChild(tr);
+});
+
+async function discoverCategory(category, btn) {
+  document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  const out = document.getElementById('discover-output');
+  out.innerHTML = '<span class="dim">Discovering tools...</span>';
+  try {
+    const res = await fetch('/api/discover', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ category }),
+    });
+    const data = await res.json();
+    out.textContent = data.content?.[0]?.text || JSON.stringify(data, null, 2);
+  } catch (e) {
+    out.innerHTML = `<span class="error">Error: ${e.message}</span>`;
+  }
+}
+
+async function invokeTool() {
+  const tool = document.getElementById('invoke-tool').value;
+  const argsStr = document.getElementById('invoke-args').value;
+  const out = document.getElementById('invoke-output');
+  out.innerHTML = '<span class="dim">Executing...</span>';
+  try {
+    const args = JSON.parse(argsStr);
+    const res = await fetch('/api/invoke', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tool, args }),
+    });
+    const data = await res.json();
+    out.textContent = data.content?.[0]?.text || JSON.stringify(data, null, 2);
+  } catch (e) {
+    out.innerHTML = `<span class="error">Error: ${e.message}</span>`;
+  }
+}
+
+async function searchTools() {
+  const query = document.getElementById('search-query').value;
+  const out = document.getElementById('search-output');
+  out.innerHTML = '<span class="dim">Searching...</span>';
+  try {
+    const res = await fetch('/api/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query }),
+    });
+    const data = await res.json();
+    out.textContent = data.content?.[0]?.text || JSON.stringify(data, null, 2);
+  } catch (e) {
+    out.innerHTML = `<span class="error">Error: ${e.message}</span>`;
+  }
+}
+</script>
+</body>
+</html>

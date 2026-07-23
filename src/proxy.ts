@@ -79,24 +79,20 @@ const DATAHUB_MCP_ENV: Record<string, string> = {
 };
 
 // Map: toolName → server config
+// File operations → @modelcontextprotocol/server-filesystem
+const FILESYSTEM_DIRS = [
+  process.env.GATEKEEPER_PROJECT_ROOT ?? PROJECT_ROOT,
+  "/tmp",
+  "/home",
+];
+const FILESYSTEM_SERVER_CMD = process.execPath;
+const FILESYSTEM_SERVER_ARGS = [FILESYSTEM_SERVER, ...FILESYSTEM_DIRS];
+
 const TOOL_SERVER_MAP: Record<string, ServerConfig> = {
-  // File operations → @modelcontextprotocol/server-filesystem
-  read_file: {
-    command: process.execPath,
-    args: [FILESYSTEM_SERVER, "/tmp", "/home"],
-  },
-  write_file: {
-    command: process.execPath,
-    args: [FILESYSTEM_SERVER, "/tmp", "/home"],
-  },
-  list_directory: {
-    command: process.execPath,
-    args: [FILESYSTEM_SERVER, "/tmp", "/home"],
-  },
-  search_files: {
-    command: process.execPath,
-    args: [FILESYSTEM_SERVER, "/tmp", "/home"],
-  },
+  read_file: { command: FILESYSTEM_SERVER_CMD, args: FILESYSTEM_SERVER_ARGS },
+  write_file: { command: FILESYSTEM_SERVER_CMD, args: FILESYSTEM_SERVER_ARGS },
+  list_directory: { command: FILESYSTEM_SERVER_CMD, args: FILESYSTEM_SERVER_ARGS },
+  search_files: { command: FILESYSTEM_SERVER_CMD, args: FILESYSTEM_SERVER_ARGS },
 
   // DataHub → DataHub MCP server (via uvx)
   dh_search: {

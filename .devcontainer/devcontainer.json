@@ -1,0 +1,21 @@
+{
+  "name": "Schema Gatekeeper",
+  "image": "mcr.microsoft.com/devcontainers/typescript-node:22",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+  },
+  "postCreateCommand": "npm install",
+  "forwardPorts": [3000, 8080],
+  "portsAttributes": {
+    "3000": { "label": "Schema Gatekeeper Demo" },
+    "8080": { "label": "DataHub GMS" }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode"
+      ]
+    }
+  }
+}

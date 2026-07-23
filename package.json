@@ -11,7 +11,9 @@
     "test": "node --import tsx/esm src/test.ts",
     "benchmark": "node --import tsx/esm src/benchmark.ts",
     "eval": "node --import tsx/esm src/eval.ts",
-    "eval:agent": "node --import tsx/esm src/agent-eval.ts"
+    "eval:agent": "node --import tsx/esm src/agent-eval.ts",
+    "demo": "node --import tsx/esm src/server.ts",
+    "setup:datahub": "docker compose -f ~/.datahub/quickstart/docker-compose.yml -p datahub up -d && sleep 30 && docker start datahub-datahub-actions-quickstart-1 datahub-frontend-quickstart-1 2>/dev/null; echo 'DataHub starting on http://localhost:8080'"
   },
   "keywords": [
     "mcp",
