@@ -458,6 +458,10 @@ async function main() {
   console.log("  Proxy path = request_skills → invoke_skill (3 gateway tools)");
   console.log("  Direct path = call underlying server directly (full schemas)\n");
 
+  // Ensure test files exist
+  fs.writeFileSync("/tmp/gatekeeper-test.txt", "This is a test file for Schema Gatekeeper eval.\nLine 2 of test data.\n");
+  fs.writeFileSync("/tmp/gatekeeper-eval.txt", "placeholder\n");
+
   const results: TaskResult[] = [];
 
   for (const task of TASKS) {
